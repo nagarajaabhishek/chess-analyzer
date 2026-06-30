@@ -406,7 +406,7 @@ function initBoard(playerIsWhite) {
     position:    "start",
     orientation: playerIsWhite ? "white" : "black",
     pieceTheme:  function(piece) {
-      return 'https://images.chesscomfiles.com/chess-themes/pieces/neo/150/' + piece.toLowerCase() + '.png';
+      return '/pieces/' + piece + '.svg';
     },
     draggable:   true,
     onDragStart: handleDragStart,
@@ -1067,60 +1067,19 @@ loadGames(); // Auto-load games on startup
 // STANDALONE OFFLINE / MOBILE FALLBACK ENGINE HELPERS
 // ══════════════════════════════════════════════════════
 
-let stockfishBlobUrl = null;
 let cachedWasmBuffer = null;
 
 async function getStockfishWorker() {
-  if (!stockfishBlobUrl) {
-    const origin = window.location.origin;
-    
-    // 1. Fetch the stockfish JS engine script (fallback to /static/js/ prefix if needed)
-    let jsRes;
-    try {
-      jsRes = await fetch(origin + "/js/stockfish.js");
-      if (!jsRes.ok) throw new Error();
-    } catch (_) {
-      jsRes = await fetch(origin + "/static/js/stockfish.js");
-    }
-    const jsText = await jsRes.text();
-    
-    // 2. Fetch and cache the stockfish WASM binary (fallback to /static/js/ prefix if needed)
-    let wasmRes;
-    try {
-      wasmRes = await fetch(origin + "/js/stockfish.wasm");
-      if (!wasmRes.ok) throw new Error();
-    } catch (_) {
-      wasmRes = await fetch(origin + "/static/js/stockfish.wasm");
-    }
+  // Cache the WASM binary so we only fetch it once per session
+  if (!cachedWasmBuffer) {
+    const wasmRes = await fetch("/js/stockfish.wasm");
     cachedWasmBuffer = await wasmRes.arrayBuffer();
-    
-    // 3. Patch stockfish.js's minified local literal configuration object 'c' to map to our injected self.Module.wasmBinary
-    const patchedJsText = jsText.replace("c={locateFile:", "c={wasmBinary:self.Module.wasmBinary,locateFile:");
-    
-    // 4. Create a wrapper script that delays Emscripten load until the WASM binary is received via postMessage
-    const wrapperStart = `
-      self.onmessage = function(e) {
-        if (e.data && e.data.wasmBinary) {
-          self.Module = {
-            wasmBinary: e.data.wasmBinary
-          };
-          self.onmessage = null; // Clear this startup listener so it doesn't intercept future Stockfish commands
-    `;
-    
-    const wrapperEnd = `
-        }
-      };
-    `;
-    
-    // 5. Combine and create the worker Blob URL
-    const combinedBlob = new Blob([wrapperStart + "\n" + patchedJsText + "\n" + wrapperEnd], { type: "application/javascript" });
-    stockfishBlobUrl = URL.createObjectURL(combinedBlob);
   }
-  
-  // 6. Spawn the worker
-  const worker = new Worker(stockfishBlobUrl);
-  
-  // 7. Sliced copy of cached buffer to transfer ownership (transferring prevents copying overhead, keeping app fluid)
+
+  // Use a static worker file — blob: URL workers are unreliable in iOS WKWebView
+  const worker = new Worker("/js/stockfish-worker.js");
+
+  // Transfer a copy of the WASM buffer to the worker to initialise Stockfish
   const bufferCopy = cachedWasmBuffer.slice(0);
   worker.postMessage({ wasmBinary: bufferCopy }, [bufferCopy]);
   
