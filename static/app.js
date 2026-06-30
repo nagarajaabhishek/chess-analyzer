@@ -1067,22 +1067,34 @@ loadGames(); // Auto-load games on startup
 // STANDALONE OFFLINE / MOBILE FALLBACK ENGINE HELPERS
 // ══════════════════════════════════════════════════════
 
-let cachedWasmBuffer = null;
-
 async function getStockfishWorker() {
-  // Cache the WASM binary so we only fetch it once per session
-  if (!cachedWasmBuffer) {
-    const wasmRes = await fetch("/js/stockfish.wasm");
-    cachedWasmBuffer = await wasmRes.arrayBuffer();
-  }
+  // Static worker file — stockfish.js auto-locates stockfish.wasm from the same directory.
+  // Blob URL workers are unreliable in iOS WKWebView so we avoid them entirely.
+  // Use stockfish.js directly as the worker — it has built-in worker detection
+  // and derives the WASM path from its own URL (/js/stockfish.wasm). Using a
+  // wrapper file breaks this because self.location would point to the wrapper.
+  const worker = new Worker("/js/stockfish.js");
 
-  // Use a static worker file — blob: URL workers are unreliable in iOS WKWebView
-  const worker = new Worker("/js/stockfish-worker.js");
+  // Stockfish posts a banner message when its WASM finishes loading.
+  // Only after that banner arrives is it safe to send "uci" and wait for "uciok".
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Stockfish init timeout")), 20000);
+    let uciSent = false;
+    const h = e => {
+      if (typeof e.data !== "string") return;
+      if (!uciSent) {
+        uciSent = true;
+        worker.postMessage("uci");
+      } else if (e.data.includes("uciok")) {
+        clearTimeout(timeout);
+        worker.removeEventListener("message", h);
+        resolve();
+      }
+    };
+    worker.addEventListener("message", h);
+    worker.onerror = e => { clearTimeout(timeout); reject(e); };
+  });
 
-  // Transfer a copy of the WASM buffer to the worker to initialise Stockfish
-  const bufferCopy = cachedWasmBuffer.slice(0);
-  worker.postMessage({ wasmBinary: bufferCopy }, [bufferCopy]);
-  
   return worker;
 }
 
