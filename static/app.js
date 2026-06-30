@@ -21,6 +21,8 @@ const state = {
   pollTimer:   null,
   liveEvalAbortController: null,
   liveEvalLines: [],
+  mainLine:         null,  // saved main game moves when exploring a variation
+  variationBranchIdx: -1, // moveIndex where the variation started
 };
 
 let useLocalWasm = false;
@@ -238,8 +240,11 @@ async function startAnalysis(game) {
   state.currentGame = game;
   state.result = null;
   state.moveIndex = -1;
+  state.mainLine = null;
+  state.variationBranchIdx = -1;
 
   showView("view-analysis");
+  $("btn-main-line").classList.add("hidden");
   $("analysis-loading").classList.remove("hidden");
   $("analysis-result").classList.add("hidden");
   $("meta-opening").textContent = game.opening;
@@ -509,7 +514,14 @@ function handleSnapEnd() {
         }
       }
 
-      // Truncate any original moves ahead of current index to start the new variation
+      // Save main line the first time we branch into a variation
+      if (!state.mainLine) {
+        state.mainLine = state.result.moves.slice();
+        state.variationBranchIdx = state.moveIndex;
+        $("btn-main-line").classList.remove("hidden");
+      }
+
+      // Truncate moves after current position to append the variation move
       state.result.moves = state.result.moves.slice(0, state.moveIndex + 1);
 
       // Create new exploration move
@@ -1011,6 +1023,15 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 
 // Analysis
 $("analysis-back").addEventListener("click", () => showView("view-games"));
+$("btn-main-line").addEventListener("click", () => {
+  if (!state.mainLine) return;
+  state.result.moves = state.mainLine;
+  state.mainLine = null;
+  renderMoveList(state.result.moves);
+  goToMove(state.variationBranchIdx);
+  state.variationBranchIdx = -1;
+  $("btn-main-line").classList.add("hidden");
+});
 $("btn-first").addEventListener("click", () => goToMove(-1));
 $("btn-prev").addEventListener("click",  () => goToMove(state.moveIndex - 1));
 $("btn-next").addEventListener("click",  () => goToMove(state.moveIndex + 1));

@@ -839,6 +839,21 @@ body {
   transition: all .15s;
 }
 .ctrl-btn:hover { color: var(--text); border-color: var(--border-2); }
+.main-line-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 12px;
+  background: rgba(251,191,36,0.12);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  color: var(--gold);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
+}
+.main-line-btn:hover { background: rgba(251,191,36,0.22); }
 .move-counter {
   font-size: 13px;
   color: var(--text-2);
