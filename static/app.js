@@ -21,8 +21,10 @@ const state = {
   pollTimer:   null,
   liveEvalAbortController: null,
   liveEvalLines: [],
-  mainLine:         null,  // saved main game moves when exploring a variation
-  variationBranchIdx: -1, // moveIndex where the variation started
+  // Variation navigation
+  // currentVariation = null  → on main line
+  // currentVariation = { branchIdx, varIdx }  → inside a variation
+  currentVariation: null,
 };
 
 let useLocalWasm = false;
@@ -240,8 +242,7 @@ async function startAnalysis(game) {
   state.currentGame = game;
   state.result = null;
   state.moveIndex = -1;
-  state.mainLine = null;
-  state.variationBranchIdx = -1;
+  state.currentVariation = null;
 
   showView("view-analysis");
   $("btn-main-line").classList.add("hidden");
@@ -490,80 +491,103 @@ function handleDrop(source, target) {
   return move ? undefined : 'snapback';
 }
 
-// After animation ends, sync board to chess.js position, append manual moves to list, and trigger live evaluation
+// Returns the currently active move array (main line or current variation)
+function getActiveMoves() {
+  if (!state.currentVariation || !state.result) return state.result?.moves || [];
+  const { branchIdx, varIdx } = state.currentVariation;
+  return state.result.moves[branchIdx].variations[varIdx];
+}
+
+// Enter a variation: switch active line to it and go to a specific move within it
+function enterVariation(branchIdx, varIdx, moveIdx) {
+  state.currentVariation = { branchIdx, varIdx };
+  $("btn-main-line").classList.remove("hidden");
+  goToMove(moveIdx);
+}
+
+// After animation ends, attach the played move as a variation on the branch point
 function handleSnapEnd() {
-  if (state.chess) {
-    state.board.position(state.chess.fen(), false);
+  if (!state.chess) return;
+  state.board.position(state.chess.fen(), false);
 
-    // Get the move just played from chess.js history
-    const history = state.chess.history({ verbose: true });
-    const moveObj = history[history.length - 1];
+  const history = state.chess.history({ verbose: true });
+  const moveObj = history[history.length - 1];
+  if (!moveObj || !state.result) { triggerLiveEvaluation(state.chess.fen()); return; }
 
-    if (moveObj && state.result) {
-      const prevMove = state.result.moves[state.moveIndex];
-      let moveNum = 1;
-      let color = 'white';
+  const activeMoves = getActiveMoves();
+  const branchIdx = state.moveIndex; // index in the active line we're branching from
 
-      if (prevMove) {
-        if (prevMove.color === 'white') {
-          moveNum = prevMove.move_num;
-          color = 'black';
-        } else {
-          moveNum = prevMove.move_num + 1;
-          color = 'white';
-        }
-      }
+  // Determine move number and color for the new move
+  const prevMove = activeMoves[branchIdx];
+  let moveNum = 1, color = 'white';
+  if (prevMove) {
+    moveNum = prevMove.color === 'white' ? prevMove.move_num : prevMove.move_num + 1;
+    color   = prevMove.color === 'white' ? 'black' : 'white';
+  }
 
-      // Save main line the first time we branch into a variation
-      if (!state.mainLine) {
-        state.mainLine = state.result.moves.slice();
-        state.variationBranchIdx = state.moveIndex;
-        $("btn-main-line").classList.remove("hidden");
-      }
+  const newMove = {
+    move_num: moveNum,
+    color,
+    san:      moveObj.san,
+    uci:      moveObj.from + moveObj.to + (moveObj.promotion || ''),
+    fen:      state.chess.fen(),
+    eval_cp:  0,
+    eval_str: '0.0',
+    cls:      'variation',
+    variations: [],
+  };
 
-      // Truncate moves after current position to append the variation move
-      state.result.moves = state.result.moves.slice(0, state.moveIndex + 1);
-
-      // Create new exploration move
-      const newMove = {
-        move_num: moveNum,
-        color:    color,
-        san:      moveObj.san,
-        uci:      moveObj.from + moveObj.to,
-        fen:      state.chess.fen(),
-        eval_cp:  0,
-        eval_str: "0.0",
-        cls:      "book" // default book coloring for user moves
-      };
-
-      state.result.moves.push(newMove);
-      state.moveIndex = state.result.moves.length - 1;
-
-      // Re-render move list to display the new move
-      renderMoveList(state.result.moves);
-
-      // Highlight active move
-      document.querySelectorAll(".move-cell").forEach(el => {
-        el.classList.toggle("active", parseInt(el.dataset.idx) === state.moveIndex);
-      });
-
-      // Scroll active move cell into view without scrolling the whole page
-      const container = document.querySelector(".moves-list-wrap");
-      const active = document.querySelector(".move-cell.active");
-      if (container && active) {
-        container.scrollTo({
-          top: active.offsetTop - (container.clientHeight / 2) + (active.clientHeight / 2),
-          behavior: "smooth"
-        });
-      }
-    }
-
+  // Check if the next main-line move is the same — if so, just navigate there (no new variation)
+  const nextMainMove = activeMoves[branchIdx + 1];
+  if (nextMainMove && nextMainMove.uci === newMove.uci) {
+    goToMove(branchIdx + 1);
     triggerLiveEvaluation(state.chess.fen());
+    return;
+  }
+
+  if (state.currentVariation) {
+    // Already in a variation — append to it
+    activeMoves.push(newMove);
+    state.moveIndex = activeMoves.length - 1;
+  } else {
+    // On the main line — attach variation to the branch point move
+    const branchMove = state.result.moves[branchIdx];
+    if (!branchMove.variations) branchMove.variations = [];
+
+    // Check if a variation starting with this move already exists
+    const existingVarIdx = branchMove.variations.findIndex(v => v[0]?.uci === newMove.uci);
+    if (existingVarIdx !== -1) {
+      // Enter the existing variation
+      state.currentVariation = { branchIdx, varIdx: existingVarIdx };
+      state.moveIndex = 0;
+    } else {
+      // Create new variation
+      branchMove.variations.push([newMove]);
+      const varIdx = branchMove.variations.length - 1;
+      state.currentVariation = { branchIdx, varIdx };
+      state.moveIndex = 0;
+    }
+    $("btn-main-line").classList.remove("hidden");
+  }
+
+  renderMoveList(state.result.moves);
+  scrollToActive();
+  triggerLiveEvaluation(state.chess.fen());
+}
+
+function scrollToActive() {
+  const container = document.querySelector(".moves-list-wrap");
+  const active = document.querySelector(".move-cell.active");
+  if (container && active) {
+    container.scrollTo({
+      top: active.offsetTop - container.clientHeight / 2 + active.clientHeight / 2,
+      behavior: "smooth"
+    });
   }
 }
 
 function goToMove(idx) {
-  const moves = state.result?.moves || [];
+  const moves = getActiveMoves();
   state.moveIndex = Math.max(-1, Math.min(idx, moves.length - 1));
 
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -589,26 +613,23 @@ function goToMove(idx) {
     fen = move.fen;
   }
 
-  // Update active move in list
+  // Update active move in list — match by both line context and index
+  const cv = state.currentVariation;
   document.querySelectorAll(".move-cell").forEach(el => {
-    el.classList.toggle("active", parseInt(el.dataset.idx) === state.moveIndex);
+    const elIdx  = parseInt(el.dataset.idx);
+    const elBranch = el.dataset.branch !== undefined ? parseInt(el.dataset.branch) : null;
+    const elVar    = el.dataset.var    !== undefined ? parseInt(el.dataset.var)    : null;
+
+    let isActive = false;
+    if (cv === null && elBranch === null) {
+      isActive = elIdx === state.moveIndex;
+    } else if (cv !== null && elBranch === cv.branchIdx && elVar === cv.varIdx) {
+      isActive = elIdx === state.moveIndex;
+    }
+    el.classList.toggle("active", isActive);
   });
 
-  // Scroll active move cell into view inside the sub-container without scrolling the whole window
-  const container = document.querySelector(".moves-list-wrap");
-  const active = document.querySelector(".move-cell.active");
-  if (container && active) {
-    const containerHeight = container.clientHeight;
-    const activeTop = active.offsetTop;
-    const activeHeight = active.clientHeight;
-    // Align active cell at the center of the list box
-    container.scrollTo({
-      top: activeTop - (containerHeight / 2) + (activeHeight / 2),
-      behavior: "smooth"
-    });
-  }
-
-  // Trigger live evaluation for the active position
+  scrollToActive();
   triggerLiveEvaluation(fen);
 }
 
@@ -814,50 +835,129 @@ function renderMoveList(moves) {
   const list = $("moves-list");
   list.innerHTML = "";
 
-  // Build rows: pair up white and black moves
   let i = 0;
   while (i < moves.length) {
     const white = moves[i];
     const black = moves[i + 1];
-    const moveNum = white.move_num;
 
-    // Move number cell
+    // Move number
     const numCell = document.createElement("div");
     numCell.className = "move-num";
-    numCell.textContent = moveNum + ".";
+    numCell.textContent = white.move_num + ".";
     list.appendChild(numCell);
 
-    // White move cell
-    list.appendChild(makeMoveCell(white, i));
+    // White move
+    list.appendChild(makeMoveCell(white, i, null, null));
 
-    // Black move cell (or empty)
+    // Black move (or empty placeholder)
     if (black) {
-      list.appendChild(makeMoveCell(black, i + 1));
+      list.appendChild(makeMoveCell(black, i + 1, null, null));
     } else {
       const empty = document.createElement("div");
       empty.className = "move-cell empty";
       list.appendChild(empty);
     }
 
+    // Variations branching from white move
+    const whiteVars = white.variations || [];
+    whiteVars.forEach((varMoves, varIdx) => {
+      if (varMoves.length) {
+        list.appendChild(makeVariationBlock(varMoves, i, varIdx, white.move_num, 'white'));
+      }
+    });
+
+    // Variations branching from black move
+    if (black) {
+      const blackVars = black.variations || [];
+      blackVars.forEach((varMoves, varIdx) => {
+        if (varMoves.length) {
+          list.appendChild(makeVariationBlock(varMoves, i + 1, varIdx, black.move_num, 'black'));
+        }
+      });
+    }
+
     i += 2;
   }
 }
 
-function makeMoveCell(move, idx) {
-  const cell = document.createElement("div");
-  cell.className = `move-cell cls-${move.cls}`;
-  cell.dataset.idx = idx;
-  cell.title = `${CLS[move.cls]?.label} · CPL: ${move.cpl}`;
+// Build an inline variation block: (N. move move ...)
+function makeVariationBlock(varMoves, branchIdx, varIdx, startMoveNum, branchColor) {
+  const wrap = document.createElement("div");
+  wrap.className = "variation-block";
+  // span all 3 columns (num + white + black)
+  wrap.style.gridColumn = "1 / -1";
 
-  const dot = document.createElement("div");
-  dot.className = "move-cls-dot";
-  cell.appendChild(dot);
+  const inner = document.createElement("div");
+  inner.className = "variation-inner";
+  wrap.appendChild(inner);
+
+  inner.appendChild(makeVarToken("(", "var-bracket"));
+
+  let moveNum = startMoveNum;
+  let color = branchColor === 'white' ? 'black' : 'white'; // first var move is the alternative
+  // If branching from white, the variation starts with white's alternative
+  color = branchColor === 'white' ? 'white' : 'black';
+
+  varMoves.forEach((move, idx) => {
+    // Move number label — show for white moves, or for the first black move in var
+    if (move.color === 'white') {
+      inner.appendChild(makeVarToken(move.move_num + ".", "var-num"));
+    } else if (idx === 0) {
+      inner.appendChild(makeVarToken(move.move_num + "…", "var-num"));
+    }
+    inner.appendChild(makeMoveCell(move, idx, branchIdx, varIdx));
+  });
+
+  inner.appendChild(makeVarToken(")", "var-bracket"));
+  return wrap;
+}
+
+function makeVarToken(text, cls) {
+  const el = document.createElement("span");
+  el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+// branchIdx/varIdx are null for main-line moves, set for variation moves
+function makeMoveCell(move, idx, branchIdx, varIdx) {
+  const cell = document.createElement("div");
+  const isVar = branchIdx !== null;
+  cell.className = `move-cell cls-${move.cls}${isVar ? ' var-move' : ''}`;
+  cell.dataset.idx = idx;
+  if (isVar) {
+    cell.dataset.branch = branchIdx;
+    cell.dataset.var    = varIdx;
+  }
+
+  if (!isVar) {
+    cell.title = move.cpl !== undefined
+      ? `${CLS[move.cls]?.label || move.cls} · CPL: ${move.cpl}`
+      : move.san;
+  }
+
+  if (!isVar) {
+    const dot = document.createElement("div");
+    dot.className = "move-cls-dot";
+    cell.appendChild(dot);
+  }
 
   const san = document.createElement("span");
   san.textContent = move.san;
   cell.appendChild(san);
 
-  cell.addEventListener("click", () => goToMove(idx));
+  if (isVar) {
+    cell.addEventListener("click", () => enterVariation(branchIdx, varIdx, idx));
+  } else {
+    cell.addEventListener("click", () => {
+      // Clicking a main-line move while in a variation returns to main line first
+      if (state.currentVariation) {
+        state.currentVariation = null;
+        $("btn-main-line").classList.add("hidden");
+      }
+      goToMove(idx);
+    });
+  }
 
   cell.addEventListener("mouseenter", e => showTooltip(e, move));
   cell.addEventListener("mouseleave", hideTooltip);
@@ -1024,13 +1124,12 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 // Analysis
 $("analysis-back").addEventListener("click", () => showView("view-games"));
 $("btn-main-line").addEventListener("click", () => {
-  if (!state.mainLine) return;
-  state.result.moves = state.mainLine;
-  state.mainLine = null;
-  renderMoveList(state.result.moves);
-  goToMove(state.variationBranchIdx);
-  state.variationBranchIdx = -1;
+  if (!state.currentVariation) return;
+  const branchIdx = state.currentVariation.branchIdx;
+  state.currentVariation = null;
   $("btn-main-line").classList.add("hidden");
+  renderMoveList(state.result.moves);
+  goToMove(branchIdx);
 });
 $("btn-first").addEventListener("click", () => goToMove(-1));
 $("btn-prev").addEventListener("click",  () => goToMove(state.moveIndex - 1));
@@ -1271,8 +1370,9 @@ async function runLocalWasmAnalysis(game) {
       win_prob:    wp,
       is_best:     isBest,
       best_uci:    !isBest ? lastEval.bestMove : null,
+      variations:  [],
     });
-    
+
     lastEval = evalData;
     
     const pct = Math.round(((i + 1) / totalMoves) * 100);

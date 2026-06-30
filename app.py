@@ -197,6 +197,7 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None):
                     "win_prob":    wp,
                     "is_best":     is_best,
                     "best_uci":    best_move.uci() if not is_best else None,
+                    "variations":  [],
                 })
                 node = next_node
 
