@@ -1,0 +1,19 @@
+{
+  "name": "chess-analyzer",
+  "version": "1.0.0",
+  "description": "Analyse your Chess.com games locally with Stockfish. No paywall, no ads, no cloud.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "stockfish": "^18.0.8"
+  }
+}
