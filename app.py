@@ -2281,6 +2281,7 @@ if __name__ == "__main__":
         print(f"✅  Stockfish: {sf}")
     else:
         print("⚠️   Stockfish not found — install with: brew install stockfish")
-    print("\n🌐  http://localhost:5174")
+    port = int(os.environ.get("PORT", 5174))
+    print(f"\n🌐  http://0.0.0.0:{port}")
     print("─" * 42 + "\n")
-    app.run(debug=False, port=5174, threaded=True)
+    app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
