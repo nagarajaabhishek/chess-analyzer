@@ -1010,9 +1010,11 @@ def _twilio_request_is_valid():
 
     validator = RequestValidator(TWILIO_AUTH_TOKEN)
     signature = request.headers.get("X-Twilio-Signature", "")
-    # Reconstruct the URL Twilio itself requested rather than trusting request.url,
-    # since a reverse proxy can make Flask see http:// even though Twilio hit https://.
-    url = BASE_URL.rstrip("/") + request.full_path.rstrip("?")
+    if os.environ.get("BASE_URL"):
+        url = BASE_URL.rstrip("/") + request.full_path.rstrip("?")
+    else:
+        proto = request.headers.get("X-Forwarded-Proto", "https")
+        url = f"{proto}://{request.host}{request.full_path.rstrip('?')}"
     params = request.form.to_dict() if request.method == "POST" else {}
     return validator.validate(url, params, signature)
 
