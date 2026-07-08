@@ -3,8 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
-  <title>Chess Analyzer</title>
-  <meta name="description" content="Free self-hosted chess game analyzer. Import Chess.com games and analyse them with Stockfish."/>
+  <title>ChessLens Voice — Call and Play Chess Hands-Free</title>
+  <meta name="description" content="Call +1-(4-CHESSNOW-3) to play chess by phone! Fully voice-controlled chess hotline for blindfold training, hands-free play, low-vision accessibility, and local game analysis."/>
+  <meta name="keywords" content="accessible chess, blind chess assistant, low vision chess game, hands-free chess for blind, play chess while driving, commuter chess game, hands-free voice chess, play chess on walking call, blindfold chess training tool, chess visualization trainer, calculate chess coordinates, screen-free chess drills, play chess over phone call, simple chess hotline, elderly accessible chess game, no install chess bot, voice chess, phone chess, hands-free chess, chess hotline, blindfold chess, accessibility, blind chess, ChessLens, Stockfish"/>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="favicon.ico"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png"/>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
@@ -17,6 +22,60 @@
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
+
+<!-- ── Onboarding Phone Auth Overlay ── -->
+<div id="auth-overlay" class="auth-overlay hidden">
+  <div class="auth-card">
+    <h2>♟ Welcome to ChessLens</h2>
+    <p id="auth-instruction">Enter your phone number to automatically save, sync, and review your games across web & voice.</p>
+    <div class="auth-input-group" id="auth-phone-group">
+      <input type="tel" id="input-phone" placeholder="e.g. 5551234567" required>
+    </div>
+    <div class="auth-input-group hidden" id="auth-otp-group">
+      <input type="text" id="input-otp" placeholder="Enter 6-digit verification code" maxlength="6" style="text-align: center; font-size: 18px; letter-spacing: 2px;">
+    </div>
+    <button id="btn-submit-auth" class="btn btn-auth">Get Started</button>
+    <button id="btn-verify-auth" class="btn btn-auth hidden">Verify Code</button>
+    <button id="btn-cancel-auth" class="btn btn-secondary" style="margin-top: 8px; width: 100%; justify-content: center; background: rgba(255,255,255,0.05); border: 1px solid var(--border-2); color: var(--text-2);">Cancel</button>
+  </div>
+</div>
+
+<!-- ── Voice Call Screen Overlay ── -->
+<div id="voice-call-overlay" class="voice-call-overlay hidden">
+  <div class="call-avatar-container">
+    <div class="call-avatar" id="call-avatar">👩🏼‍💼</div>
+    <div class="call-pulse-waves">
+      <div class="pulse-wave"></div>
+      <div class="pulse-wave"></div>
+    </div>
+  </div>
+  <div class="call-details">
+    <h2 id="call-status">Dialing Coach...</h2>
+    <p id="call-subtext">Speak your moves clearly (e.g. "E4", "Knight to F3", or "E2 to E4")</p>
+    <p class="call-privacy-note">🌐 Voice calls use your browser's cloud speech recognition — unlike game analysis, this is not processed locally.</p>
+  </div>
+  <div class="call-feedback-bubble" id="call-feedback">"Waiting for speech..."</div>
+
+  <!-- On-screen equivalents of the phone-keypad shortcuts (1=resign, 2=draw, 3=takeback) —
+       a browser/mobile caller has no keypad to press, so give them buttons instead. -->
+  <div class="call-action-row" id="call-action-buttons">
+    <button class="call-action-btn" id="btn-call-resign">Resign</button>
+    <button class="call-action-btn" id="btn-call-draw">Draw</button>
+    <button class="call-action-btn" id="btn-call-takeback">Takeback</button>
+  </div>
+
+  <!-- Fallback move entry for browsers/devices without SpeechRecognition (notably iOS/Safari,
+       which WebKit has never implemented) — auto-shown in that case, always available otherwise. -->
+  <div class="call-text-fallback hidden" id="call-text-fallback">
+    <input type="text" id="call-text-input" placeholder="Type your move, e.g. Nf3" autocomplete="off"/>
+    <button id="btn-call-text-send">Send</button>
+  </div>
+
+  <div class="call-controls">
+    <button class="btn-mute" id="btn-call-mute" title="Toggle Mute">🎙️</button>
+    <button class="btn-hangup" id="btn-call-hangup" title="Hang Up">📞</button>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════
      HEADER
@@ -31,31 +90,248 @@
   </div>
 </header>
 
-<!-- ═══════════════════════════════════════════
-     VIEW: HOME
-═══════════════════════════════════════════ -->
+<!-- ── VIEW: HOME ── -->
 <div id="view-home" class="view active">
-  <div class="home-hero">
+  
+  <!-- 1. HERO SECTION -->
+  <section class="home-hero">
     <div class="hero-glow"></div>
     <div class="hero-content">
-      <h1 class="hero-title">Analyse Your Chess Games<br/><span class="gradient-text">For Free. Locally.</span></h1>
-      <p class="hero-sub">Powered by Stockfish. No paywall. No ads. No cloud.</p>
-
-      <div class="search-card">
-        <div class="search-row">
-          <div class="input-wrap">
-            <span class="input-icon">♙</span>
-            <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="off" spellcheck="false"/>
-          </div>
-          <button id="load-btn" class="btn btn-primary">
-            <span class="btn-text">Load Games</span>
-            <span class="btn-arrow">→</span>
-          </button>
+      <div class="hero-logo-group">
+        <span class="hero-logo-icon">📞</span>
+        <span class="hero-logo-text">Voice Chess</span>
+      </div>
+      
+      <h1 class="hero-title">Call and Play Chess</h1>
+      <div class="hero-tagline">Just Dial & Speak Your Moves</div>
+      
+      <!-- Interactive Phone Section (Moved below tagline & reformatted) -->
+      <div class="phone-display-section">
+        <div class="phone-label-small">📞 Dial Hotline:</div>
+        <div class="phone-row-main" style="position: relative;">
+          <a href="tel:+14243776693" id="btn-dial-phone" class="phone-link" title="Click to Call & Copy Number">+1-(4-CHESSNOW-3)</a>
+          <span id="phone-copy-tooltip" class="phone-tooltip-bubble">Copied to clipboard!</span>
         </div>
-        <div id="home-error" class="inline-error hidden"></div>
+        <div class="phone-sub-display" id="phone-number-display">+1 (424) 377-6693</div>
+      </div>
+      
+      <p class="hero-sub" style="margin-top: 24px;">Play hands-free chess against our AI companion Thara or challenge friends over a phone call.</p>
+      
+      <!-- Action Buttons Row -->
+      <div class="hero-buttons">
+        <button id="btn-home-play" class="btn btn-primary btn-play-call">
+          <span class="play-icon">🌐</span> Launch Web Lobby
+        </button>
+        <button id="btn-scroll-analysis" class="btn btn-secondary">
+          <span>🔍 Analyze Games</span> <span class="arrow-down">↓</span>
+        </button>
       </div>
 
+      <div class="voice-indicator">
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <span>Speak to Thara to start playing</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. FEATURES SECTION (HOW IT WORKS) -->
+  <section class="home-features" id="section-how-it-works">
+    <div class="section-container">
+      <h2 class="section-title">How Voice Chess Works</h2>
+      <p class="section-subtitle">A seamless bridge between telephony and chess engines.</p>
+      
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon-box">📞</div>
+          <h3>1. Dial the Hotline</h3>
+          <p>Call the number on the hero section from any phone. No apps, no internet, and no configurations needed.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">💬</div>
+          <h3>2. Speak Your Moves</h3>
+          <p>State your moves naturally. Thara understands algebraic notation like "e4", "Knight to f3", or coordinate styles.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">🤖</div>
+          <h3>3. Dynamic AI Opponent</h3>
+          <p>Thara adjusts to your Elo rating dynamically. She talks back, jokes, and speaks her moves out loud.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">🔄</div>
+          <h3>4. Live Web Sync</h3>
+          <p>Keep this dashboard open during your call. The digital chessboard will automatically render the moves in real time!</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2.3 DESIGNED FOR EVERY PLAYER (USE CASES) -->
+  <section class="home-use-cases" id="section-use-cases">
+    <div class="section-container">
+      <h2 class="section-title">Designed for Every Player</h2>
+      <p class="section-subtitle">ChessLens Voice bridges accessibility, training, and gameplay for everyone.</p>
+      
+      <div class="use-cases-grid">
+        <!-- Card 1: Accessibility -->
+        <div class="use-case-card">
+          <div class="use-case-icon-box">♿</div>
+          <h3>Visually Impaired & Accessibility</h3>
+          <p class="use-case-description">Play screen-free chess without clumsy touchscreens or screen readers. Speak moves naturally and hear audio feedback from Thara.</p>
+          <div class="use-case-keywords">
+            <span class="keyword-tag">accessible chess</span>
+            <span class="keyword-tag">blind chess assistant</span>
+            <span class="keyword-tag">low vision chess game</span>
+            <span class="keyword-tag">hands-free chess for blind</span>
+          </div>
+        </div>
+        
+        <!-- Card 2: Commuters -->
+        <div class="use-case-card">
+          <div class="use-case-icon-box">🚗</div>
+          <h3>Commuters & Multi-taskers</h3>
+          <p class="use-case-description">Play chess while driving, walking the dog, doing chores, or exercising. Call the hotline from your headset with zero screen time.</p>
+          <div class="use-case-keywords">
+            <span class="keyword-tag">play chess while driving</span>
+            <span class="keyword-tag">commuter chess game</span>
+            <span class="keyword-tag">hands-free voice chess</span>
+            <span class="keyword-tag">play chess on walking call</span>
+          </div>
+        </div>
+        
+        <!-- Card 3: Blindfold Training -->
+        <div class="use-case-card">
+          <div class="use-case-icon-box">🧠</div>
+          <h3>Blindfold & Visualization</h3>
+          <p class="use-case-description">Train calculation and board visualization in your head. Memorize coordinates and mimic grandmaster blindfold training.</p>
+          <div class="use-case-keywords">
+            <span class="keyword-tag">blindfold chess training tool</span>
+            <span class="keyword-tag">chess visualization trainer</span>
+            <span class="keyword-tag">calculate chess coordinates</span>
+            <span class="keyword-tag">screen-free chess drills</span>
+          </div>
+        </div>
+        
+        <!-- Card 4: Traditionalists -->
+        <div class="use-case-card">
+          <div class="use-case-icon-box">☎️</div>
+          <h3>Traditionalists & Seniors</h3>
+          <p class="use-case-description">Zero setup required. Play instant voice chess without installing apps, using a computer, or creating complex online accounts.</p>
+          <div class="use-case-keywords">
+            <span class="keyword-tag">play chess over phone call</span>
+            <span class="keyword-tag">simple chess hotline</span>
+            <span class="keyword-tag">elderly accessible chess game</span>
+            <span class="keyword-tag">no install chess bot</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2.5 LIVE GAMES SECTION -->
+  <section class="home-live-games" id="section-live-games">
+    <div class="section-container">
+      <h2 class="section-title">Live Ongoing Games</h2>
+      <p class="section-subtitle">Real-time games being played over the voice hotline.</p>
+      <div id="live-games-container" class="live-games-grid">
+        <div class="live-game-placeholder-card">
+          <p>Checking for live games...</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. CHESS.COM ANALYSIS SECTION -->
+  <section class="home-analysis-section" id="section-analysis">
+    <div class="section-container">
+      <h2 class="section-title">Local Game Analyzer</h2>
+      <p class="section-subtitle">Import and review your past Chess.com games with full privacy.</p>
+      
+      <div class="analysis-card-wrap">
+        <div class="search-card">
+          <h3 class="search-card-title">Analyze Chess.com Profile</h3>
+          <p class="search-card-sub">Run Stockfish 18 locally in your browser — zero cloud footprint.</p>
+          <div class="search-row">
+            <div class="input-wrap">
+              <span class="input-icon">♙</span>
+              <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="off" spellcheck="false"/>
+            </div>
+            <button id="load-btn" class="btn btn-primary">
+              <span class="btn-text">Load Games</span>
+              <span class="btn-arrow">→</span>
+            </button>
+          </div>
+          <div id="home-error" class="inline-error hidden"></div>
+        </div>
+      </div>
+      
       <div id="sf-status" class="sf-badge hidden"></div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <p class="footer-copy">&copy; 2026 ChessLens. All rights reserved.</p>
+      <div class="footer-links">
+        <a href="#" class="footer-link" id="footer-link-home">Home</a>
+        <a href="#section-how-it-works" class="footer-link" id="footer-link-how">How it Works</a>
+        <a href="#section-live-games" class="footer-link" id="footer-link-live">Live Games</a>
+        <a href="#section-analysis" class="footer-link" id="footer-link-analysis">Analyzer</a>
+        <a href="#" class="footer-link" id="footer-link-about">About</a>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ═══════════════════════════════════════════
+     VIEW: PLAY LOBBY (VOICE CALLS & PVP)
+     ═══════════════════════════════════════════ -->
+<div id="view-play" class="view hidden">
+  <div class="page-header">
+    <div class="header-top-row">
+      <button class="back-btn" id="play-back">← Back</button>
+      <div class="profile-tag hidden" id="play-profile-tag">
+        <span class="profile-avatar" id="play-profile-avatar">?</span>
+        <span class="profile-username" id="play-profile-name"></span>
+      </div>
+    </div>
+    <div>
+      <h2>Live Voice Play</h2>
+      <p class="page-sub">Play chess hands-free using your phone or browser speech recognition</p>
+    </div>
+  </div>
+
+  <div class="play-section">
+    <div class="bot-selector-card">
+      <h3>🤖 Call Thara</h3>
+      <p>Thara is your chess assistant and companion. She dynamically matches your Elo rating (±20 Elo) for a formal, balanced game.</p>
+      <div class="bot-selector-row">
+        <select id="personality-select" class="bot-select-dropdown" style="margin-right: 10px;">
+          <option value="formal" selected>Formal Coach 👩🏼‍💼</option>
+          <option value="minimal">Minimalist (Moves Only) 🔇</option>
+        </select>
+        <button class="btn btn-primary btn-call" id="btn-games-call" title="Start a voice chess game">📞 Call Thara</button>
+      </div>
+    </div>
+
+    <div class="pvp-challenge-card">
+      <h3>♟️ Challenge a Friend</h3>
+      <p>Enter their phone number — they'll play Black when they call in.</p>
+      <div class="pvp-challenge-row">
+        <input type="tel" id="pvp-opponent-phone" placeholder="Opponent phone number" autocomplete="off"/>
+        <button id="btn-send-challenge" class="btn btn-primary">Challenge</button>
+      </div>
+      <div id="pvp-challenge-status" class="pvp-challenge-status hidden"></div>
+    </div>
+
+    <div class="pvp-pending-card" id="pvp-pending-card">
+      <div class="saved-games-header">📥 Incoming Challenges</div>
+      <div id="pvp-pending-list" class="pvp-pending-list"></div>
     </div>
   </div>
 </div>
@@ -65,8 +341,14 @@
 ═══════════════════════════════════════════ -->
 <div id="view-games" class="view hidden">
   <div class="page-header">
-    <button class="back-btn" id="games-back">← Back</button>
-    <button class="back-btn" id="games-refresh">⟳ Refresh</button>
+    <div class="header-top-row">
+      <button class="back-btn" id="games-back">← Back</button>
+      <button class="back-btn" id="games-refresh">⟳ Refresh</button>
+      <div class="profile-tag hidden" id="games-profile-tag">
+        <span class="profile-avatar" id="games-profile-avatar">?</span>
+        <span class="profile-username" id="games-profile-name"></span>
+      </div>
+    </div>
     <div>
       <h2 id="games-title">Recent Games</h2>
       <p id="games-sub" class="page-sub"></p>
@@ -80,34 +362,54 @@
       </div>
     </div>
   </div>
-  <!-- KPI Dashboard Container -->
-  <div class="games-kpi-row">
-    <div class="kpi-card">
-      <div class="kpi-title">Record (Win %)</div>
-      <div id="kpi-record" class="kpi-value">—</div>
+
+  <!-- Games Category Toggles -->
+  <div class="games-tabs">
+    <button class="games-tab active" data-gamestab="chesscom">♟️ Chess.com Profile</button>
+    <button class="games-tab" data-gamestab="voice">📞 Voice Call Games</button>
+  </div>
+
+  <!-- Group 1: Chess.com Games -->
+  <div id="group-chesscom-games">
+    <!-- KPI Dashboard Container -->
+    <div class="games-kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-title">Record (Win %)</div>
+        <div id="kpi-record" class="kpi-value">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Avg Opponent Rating</div>
+        <div id="kpi-opp-rating" class="kpi-value">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Current Streak</div>
+        <div id="kpi-streak" class="kpi-value">—</div>
+      </div>
     </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Avg Opponent Rating</div>
-      <div id="kpi-opp-rating" class="kpi-value">—</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Current Streak</div>
-      <div id="kpi-streak" class="kpi-value">—</div>
+
+    <!-- Games List Container -->
+    <div class="games-list-container">
+      <div class="games-list-header">
+        <div>Result</div>
+        <div>Opponent</div>
+        <div>Opening</div>
+        <div>Time Control</div>
+        <div>Date</div>
+        <div>Action</div>
+      </div>
+      <div id="games-list" class="games-list-rows"></div>
     </div>
   </div>
 
-  <!-- Games List Container -->
-  <div class="games-list-container">
-    <div class="games-list-header">
-      <div>Result</div>
-      <div>Opponent</div>
-      <div>Opening</div>
-      <div>Time Control</div>
-      <div>Date</div>
-      <div>Action</div>
+  <!-- Group 2: Voice Games -->
+  <div id="group-voice-games" class="hidden">
+    <div class="games-list-container">
+      <div id="saved-games-list" class="saved-games-list">
+        <div class="game-history-item empty">Loading saved games...</div>
+      </div>
     </div>
-    <div id="games-list" class="games-list-rows"></div>
   </div>
+
 </div>
 
 <!-- ═══════════════════════════════════════════
@@ -145,13 +447,31 @@
         <div class="player-info">
           <div class="player-avatar" id="avatar-top"></div>
           <div>
-            <div class="player-name" id="name-top"></div>
-            <div class="player-rating" id="rating-top"></div>
+            <div class="player-title-row">
+              <span class="player-name" id="name-top"></span>
+              <span class="player-rating" id="rating-top"></span>
+            </div>
+            <div class="captured-row" id="player-top-captured"></div>
           </div>
         </div>
-        <div class="player-accuracy" id="acc-top">
-          <span class="acc-value" id="acc-top-val">—</span>
-          <span class="acc-label">Accuracy</span>
+        <div class="player-stats-row">
+          <div class="player-clock hidden" id="clock-top">--:--</div>
+          <div class="player-accuracy" id="acc-top">
+            <span class="acc-value" id="acc-top-val">—</span>
+            <span class="acc-label">Accuracy</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Chess Coach speech bubble -->
+      <div id="coach-panel" class="coach-panel hidden">
+        <div class="coach-avatar">👨🏻‍💼</div>
+        <div class="coach-bubble">
+          <div class="coach-header">
+            <span id="coach-move-badge" class="coach-badge"></span>
+            <span id="coach-move-title" class="coach-title">Game Review</span>
+          </div>
+          <div id="coach-text" class="coach-text">Select a move to begin analysis.</div>
         </div>
       </div>
 
@@ -171,26 +491,97 @@
         <div class="player-info">
           <div class="player-avatar" id="avatar-bottom"></div>
           <div>
-            <div class="player-name" id="name-bottom"></div>
-            <div class="player-rating" id="rating-bottom"></div>
+            <div class="player-title-row">
+              <span class="player-name" id="name-bottom"></span>
+              <span class="player-rating" id="rating-bottom"></span>
+            </div>
+            <div class="captured-row" id="player-bottom-captured"></div>
           </div>
         </div>
-        <div class="player-accuracy" id="acc-bottom">
-          <span class="acc-value" id="acc-bottom-val">—</span>
-          <span class="acc-label">Accuracy</span>
+        <div class="player-stats-row">
+          <div class="player-clock hidden" id="clock-bottom">--:--</div>
+          <div class="player-accuracy" id="acc-bottom">
+            <span class="acc-value" id="acc-bottom-val">—</span>
+            <span class="acc-label">Accuracy</span>
+          </div>
         </div>
       </div>
 
-      <!-- Controls -->
-      <div class="board-controls">
+      <!-- Mobile Horizontal Moves Scroll Bar -->
+      <div class="mobile-navigation-row" id="mobile-nav-row">
+        <button class="ctrl-btn-mobile" id="btn-mobile-prev" title="Previous Move">◀</button>
+        <div class="mobile-moves-scroll" id="mobile-moves-list"></div>
+        <button class="ctrl-btn-mobile" id="btn-mobile-next" title="Next Move">▶</button>
+      </div>
+
+      <!-- Controls (Desktop) -->
+      <div class="board-controls" id="desktop-board-controls">
         <button class="ctrl-btn" id="btn-first" title="First move">⏮</button>
         <button class="ctrl-btn" id="btn-prev"  title="Previous">◀</button>
         <span id="move-counter" class="move-counter">Start</span>
         <button class="ctrl-btn" id="btn-next"  title="Next">▶</button>
         <button class="ctrl-btn" id="btn-last"  title="Last move">⏭</button>
         <button class="ctrl-btn" id="btn-flip"  title="Flip board">⟳</button>
+        <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">📞</button>
       </div>
       <button id="btn-main-line" class="main-line-btn hidden" title="Return to main game line">↩ Back to main line</button>
+
+      <!-- Mobile Bottom Actions bar -->
+      <div class="mobile-bottom-bar" id="mobile-action-bar">
+        <button class="mobile-action-btn" id="btn-mobile-flip">
+          <span class="mobile-action-icon">⟳</span>
+          <span class="mobile-action-text">Flip</span>
+        </button>
+        <button class="mobile-action-btn" id="btn-mobile-show-best">
+          <span class="mobile-action-icon">💡</span>
+          <span class="mobile-action-text">Best</span>
+        </button>
+        <button class="mobile-action-btn" id="btn-mobile-retry">
+          <span class="mobile-action-icon">↻</span>
+          <span class="mobile-action-text">Retry</span>
+        </button>
+        <button class="mobile-action-btn btn-call" id="btn-mobile-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">
+          <span class="mobile-action-icon">📞</span>
+          <span class="mobile-action-text">Call</span>
+        </button>
+        <button class="btn-mobile-primary-next" id="btn-mobile-next-key">
+          Next
+        </button>
+      </div>
+
+      <!-- Mobile Game Review Card (Scrollable Whitespace container) -->
+      <div id="mobile-review-card" class="mobile-review-card">
+        <div class="mob-review-header">Game Review Summary</div>
+        
+        <div class="mob-review-scroll-area">
+          <!-- 1. Evaluation Chart Section -->
+          <div class="mob-chart-section" style="margin-top: 0 !important;">
+            <div class="mob-chart-label">Win Probability Chart</div>
+            <div class="mob-chart-wrap">
+              <canvas id="mob-win-chart"></canvas>
+            </div>
+          </div>
+
+          <!-- 2. Classification Counts Grid -->
+          <div class="mob-cls-grid" id="mob-cls-grid" style="margin-top: 12px !important;"></div>
+
+          <!-- 3. Game Metadata Info Grid -->
+          <div class="mob-info-grid">
+            <div class="mob-info-item">
+              <span class="mob-info-label">Opening</span>
+              <span class="mob-info-value" id="mob-info-opening">—</span>
+            </div>
+            <div class="mob-info-item">
+              <span class="mob-info-label">Result</span>
+              <span class="mob-info-value" id="mob-info-result">—</span>
+            </div>
+            <div class="mob-info-item">
+              <span class="mob-info-label">Moves</span>
+              <span class="mob-info-value" id="mob-info-moves">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- RIGHT: Unified Sidebar (Chess.com Style) -->
@@ -222,6 +613,7 @@
           </div>
           <!-- Big Green Game Review Action Button -->
           <div class="game-review-action">
+            <div class="desktop-summary-pills hidden" id="desktop-summary-pills"></div>
             <button id="btn-trigger-review" class="btn btn-review">
               <span class="review-icon">★</span> Game Review
             </button>
@@ -265,6 +657,9 @@
           </div>
         </div>
 
+        <!-- Games tab removed — bot selector, PvP challenge, and game history
+             have been moved to the top-level view-games page where they belong. -->
+
       </div>
     </div>
 
@@ -279,6 +674,36 @@
 
 </div><!-- /view-analysis -->
 
+<!-- ═══════════════════════════════════════════
+     VIEW: ABOUT
+═══════════════════════════════════════════ -->
+<div id="view-about" class="view hidden">
+  <div class="page-header">
+    <div class="header-top-row">
+      <button class="back-btn" id="about-back">← Back</button>
+    </div>
+    <div>
+      <h2>About ChessLens Voice</h2>
+      <p class="page-sub">Hands-Free Chess Powered by Telephony & AI</p>
+    </div>
+  </div>
+
+  <div class="about-section">
+    <div class="about-card">
+      <h3>♟️ What is ChessLens Voice?</h3>
+      <p>ChessLens Voice is a privacy-focused local chess client and voice-gaming platform. It allows users to play complete chess games over a traditional phone call—completely hands-free, no screens required.</p>
+      
+      <h3>🤖 AI Chess Assistant: Thara</h3>
+      <p>Thara is your interactive chess companion and coach. She transcribes your spoken moves in real-time, validates them using a rules engine, and responds with natural audio commentary. Thara matches your Elo rating dynamically and adds personality to every game.</p>
+      
+      <h3>🔄 Real-Time Dashboard Sync</h3>
+      <p>When you call the hotline, you can keep this web dashboard open. The digital board automatically reflects the moves on the call as they happen. Anyone can spectate active games in progress via the live games feed.</p>
+      
+      <h3>🔒 Local Stockfish Engine</h3>
+      <p>In addition to voice games, ChessLens features local profile analysis. Import games from Chess.com and run deep game analysis with Stockfish 18 running locally in your browser via WebAssembly (or via a local binary in a self-hosted server). Your data never leaves your computer.</p>
+    </div>
+  </div>
+</div>
 
 <!-- Scripts -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>

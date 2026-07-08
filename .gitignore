@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 .env
 analysis_cache.json
+*.db
 ios/App/App/public/
 .claude/
