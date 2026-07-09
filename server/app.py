@@ -89,6 +89,9 @@ with app.app_context():
         _existing_cols = {c["name"] for c in _inspector.get_columns("users")}
         if "elo" not in _existing_cols:
             db.session.execute(db.text("ALTER TABLE users ADD COLUMN elo INTEGER DEFAULT 1000"))
+        if "sms_opt_out" not in _existing_cols:
+            db.session.execute(db.text("ALTER TABLE users ADD COLUMN sms_opt_out BOOLEAN DEFAULT FALSE"))
+            db.session.commit()
 
     if "call_logs" in _inspector.get_table_names():
         _existing_cols = {c["name"] for c in _inspector.get_columns("call_logs")}
@@ -1254,6 +1257,62 @@ def _verify_stream_token(call_sid, token):
     return hmac.compare_digest(expected, sig)
 
 
+def send_challenge_invite_sms(opponent_phone: str, challenger_phone: str):
+    """One-time SMS telling the challenged friend how to play (the referral loop).
+
+    TCPA discipline: exactly one message per challenge, includes STOP opt-out,
+    suppressed for opted-out numbers, and a Twilio 21610 (recipient blocked us)
+    response durably sets sms_opt_out. Runs in a background thread.
+    """
+    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
+        print("⚠️  Challenge invite SMS skipped — Twilio credentials incomplete.")
+        return
+
+    opponent = db.session.get(User, opponent_phone)
+    if opponent and opponent.sms_opt_out:
+        print(f"ℹ️  Challenge invite SMS suppressed — {opponent_phone[-4:]} opted out.")
+        return
+
+    digits_only = "".join(filter(str.isdigit, opponent_phone))
+    if len(digits_only) == 10:
+        digits_only = "1" + digits_only
+    to_e164 = f"+{digits_only}"
+
+    ch_digits = "".join(filter(str.isdigit, challenger_phone))
+    if len(ch_digits) == 10:
+        ch_digits = "1" + ch_digits
+    challenger_display = f"+{ch_digits}"
+
+    body = (
+        f"♟ ChessNow: your friend at {challenger_display} challenged you to voice chess! "
+        f"Call {TWILIO_PHONE_NUMBER} from any phone to play — no app or account needed. "
+        f"Reply STOP to opt out."
+    )
+
+    def _send():
+        try:
+            resp = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+                auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                data={"From": TWILIO_PHONE_NUMBER, "To": to_e164, "Body": body},
+                timeout=10,
+            )
+            if resp.status_code == 201:
+                print(f"✅  Challenge invite SMS sent to {to_e164}")
+            else:
+                print(f"⚠️  Twilio invite SMS error {resp.status_code}: {resp.text[:200]}")
+                if '"code": 21610' in resp.text or "'code': 21610" in resp.text:
+                    with app.app_context():
+                        opp = db.session.get(User, opponent_phone)
+                        if opp:
+                            opp.sms_opt_out = True
+                            db.session.commit()
+        except Exception as exc:
+            print(f"⚠️  Challenge invite SMS exception: {exc}")
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
 def send_postgame_sms(to_phone: str, game_id: str, result_speech: str, move_count: int):
     """Fire a post-game SMS recap to the caller via Twilio REST API.
 
@@ -1658,10 +1717,16 @@ def voice_challenge():
                 stale.result = "aborted"
                 db.session.commit()
 
+        invite_recently_sent = False
         with _lock_for_phone(opponent_clean):
             # End any of the invitee's existing in-progress voice games as well
             stale_opp = find_active_live_game(opponent_clean)
             if stale_opp:
+                # Re-challenging the same friend within the hour must not re-text them
+                if (stale_opp.source == "voice_pvp" and stale_opp.white_phone == phone_clean
+                        and stale_opp.pgn == "" and stale_opp.created_at
+                        and (datetime.now(timezone.utc).replace(tzinfo=None) - stale_opp.created_at) < timedelta(hours=1)):
+                    invite_recently_sent = True
                 stale_opp.result = "aborted"
                 db.session.commit()
 
@@ -1679,6 +1744,11 @@ def voice_challenge():
         )
         db.session.add(game)
         db.session.commit()
+
+        # The referral loop: tell the challenged friend how to play (one SMS per challenge)
+        if not invite_recently_sent:
+            send_challenge_invite_sms(opponent_clean, phone_clean)
+
         return jsonify({"status": "success", "game_id": game.id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
