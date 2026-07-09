@@ -76,15 +76,15 @@ body {
    HEADER
 ═══════════════════════════════════════════════════════ */
 .header {
-  position: sticky;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 70px;
-  background: rgba(18, 18, 18, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 10, 8, 0.75); /* Warm chess theme dark background */
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 100;
   display: block;
 }
@@ -98,6 +98,7 @@ body {
   justify-content: space-between;
 }
 .logo {
+  height: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -116,22 +117,28 @@ body {
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 32px;
+  height: 100%;
 }
 .nav-link {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-2);
   text-decoration: none;
-  transition: color 0.2s ease, border-bottom 0.2s ease;
-  padding: 8px 0;
+  transition: color 0.25s ease, border-bottom-color 0.25s ease;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  border-bottom: 3px solid transparent;
+  padding: 0 4px;
+  margin-top: 3px; /* visual balance tweak for active border */
 }
 .nav-link:hover {
   color: var(--text);
 }
 .nav-link.active-link {
   color: var(--accent);
-  border-bottom: 2px solid var(--accent);
+  border-bottom-color: var(--accent);
 }
 .header-user {
   font-size: 13px;
@@ -144,7 +151,7 @@ body {
 ═══════════════════════════════════════════════════════ */
 .view {
   min-height: 100vh;
-  padding-top: calc(16px + var(--safe-top)); /* Clean spacing without fixed header */
+  padding-top: calc(86px + var(--safe-top)); /* Reclaims spacing under the fixed header (70px header + 16px padding) */
 }
 .view.active { display: block; }
 #view-analysis {
