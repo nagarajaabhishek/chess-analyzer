@@ -8,6 +8,7 @@ class User(db.Model):
     phone_number = db.Column(db.String(30), primary_key=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     elo = db.Column(db.Integer, default=1000)
+    sms_opt_out = db.Column(db.Boolean, default=False)  # STOP replies / Twilio 21610
     
     # Relationship to games
     games = db.relationship("Game", backref="user", lazy=True, cascade="all, delete-orphan")
