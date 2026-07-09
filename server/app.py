@@ -75,6 +75,7 @@ with app.app_context():
             "last_activity_at": "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
             "white_acknowledged": "ALTER TABLE games ADD COLUMN white_acknowledged BOOLEAN DEFAULT FALSE",
             "black_acknowledged": "ALTER TABLE games ADD COLUMN black_acknowledged BOOLEAN DEFAULT FALSE",
+            "hints_used": "ALTER TABLE games ADD COLUMN hints_used INTEGER DEFAULT 0",
         }
         for _col, _stmt in _migrations.items():
             if _col not in _existing_cols:
@@ -1021,9 +1022,9 @@ def _update_game_elo(game, result):
         new_elo, diff = _calculate_elo_change(old_elo, opponent_elo, user_score)
         user.elo = new_elo
         db.session.commit()
-        
+
         diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
-        return f" Your rating changed by {diff_str} to {new_elo}."
+        return f" Your rating changed by {diff_str} to {new_elo}.{_milestone_msg(old_elo, new_elo)}"
         
     elif game.source == "voice_pvp":
         opponent_phone = game.black_phone if user_color == "white" else game.white_phone
@@ -1041,10 +1042,18 @@ def _update_game_elo(game, result):
             opponent.elo = opp_new_elo
             
         db.session.commit()
-        
+
         diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
-        return f" Your rating changed by {diff_str} to {new_elo}."
-        
+        return f" Your rating changed by {diff_str} to {new_elo}.{_milestone_msg(old_elo, new_elo)}"
+
+    return ""
+
+
+def _milestone_msg(old_elo, new_elo):
+    """Celebrate crossing a rating century upward — the cheapest retention feature
+    in the codebase: the data always existed, it was just never spoken."""
+    if new_elo > old_elo and (new_elo // 100) > (old_elo // 100):
+        return f" Congratulations — you've crossed {(new_elo // 100) * 100}!"
     return ""
 
 
@@ -1329,12 +1338,22 @@ def send_postgame_sms(to_phone: str, game_id: str, result_speech: str, move_coun
         digits_only = "1" + digits_only
     to_e164 = f"+{digits_only}"
 
+    # Current rating (updated by _update_game_elo just before this is called).
+    # to_phone is game.user_phone (the User PK); digits_only covers callers passed raw.
+    rating_line = ""
+    try:
+        user = db.session.get(User, to_phone) or db.session.get(User, digits_only)
+        if user and user.elo:
+            rating_line = f" Rating: {user.elo}."
+    except Exception:
+        pass
+
     review_url = f"{BASE_URL}/?game={game_id}"
     body = (
         f"♟ ChessNow recap — {result_speech.strip()} "
-        f"({move_count} move{'s' if move_count != 1 else ''}). "
-        f"Review your game: {review_url} "
-        f"| Create a free account to track your Elo history: {BASE_URL}/signup"
+        f"({move_count} move{'s' if move_count != 1 else ''}).{rating_line} "
+        f"See your best moves and blunders: {review_url} "
+        f"| Track your Elo history across web & voice: {BASE_URL}/signup"
     )
 
     def _send():
@@ -2599,7 +2618,34 @@ def process_voice_move():
 
             # 6. Spoken help menu
             if any(k in intent_clean for k in ("help", "commands", "what can i say", "what commands")):
-                res_speech = "You can say a move like, knight to f3, or castle. You can also ask, repeat position, what's on e4, last move, whose turn, or say resign, draw, or takeback."
+                res_speech = "You can say a move like, knight to f3, or castle. You can also ask, repeat position, what's on e4, last move, whose turn, or say hint, resign, draw, or takeback."
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 7. Engine hint — the forgiveness feature (bot games only, 3 per game)
+            if any(k in intent_clean for k in ("hint", "suggest a move", "what would you play", "what should i play", "help me out")):
+                if game.source != "voice_bot":
+                    res_speech = "Hints are only available in games against me, not against another player."
+                elif (game.hints_used or 0) >= 3:
+                    res_speech = "You've used all three hints for this game. You've got this — trust your calculation."
+                else:
+                    hint_san = None
+                    sf_path = find_stockfish()
+                    if sf_path:
+                        try:
+                            with chess.engine.SimpleEngine.popen_uci(sf_path) as engine:
+                                hint_res = engine.play(board, chess.engine.Limit(time=0.2))
+                                if hint_res.move:
+                                    hint_san = board.san(hint_res.move)
+                        except Exception as e:
+                            print(f"Hint engine error: {e}")
+                    if hint_san:
+                        game.hints_used = (game.hints_used or 0) + 1
+                        db.session.commit()
+                        left = 3 - game.hints_used
+                        plural = "hints" if left != 1 else "hint"
+                        res_speech = f"I would consider {_san_to_speech(hint_san)}. You have {left} {plural} left."
+                    else:
+                        res_speech = "Sorry, I can't calculate a hint right now. Trust your instincts."
                 return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
 
         # Check if we are waiting for an ambiguous move resolution
