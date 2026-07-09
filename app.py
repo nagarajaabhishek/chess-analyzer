@@ -987,6 +987,141 @@ def _san_to_speech(san):
     return "".join(res).strip().replace("  ", " ")
 
 
+def _square_to_speech(square_name):
+    """'f3' -> 'f 3' so TTS reads the file and rank separately."""
+    return f"{square_name[0]} {square_name[1]}"
+
+
+_PIECE_SPEECH_NAMES = {
+    chess.KING: ("King", "Kings"),
+    chess.QUEEN: ("Queen", "Queens"),
+    chess.ROOK: ("Rook", "Rooks"),
+    chess.BISHOP: ("Bishop", "Bishops"),
+    chess.KNIGHT: ("Knight", "Knights"),
+    chess.PAWN: ("Pawn", "Pawns"),
+}
+
+_PIECE_POINT_VALUES = {
+    chess.QUEEN: 9,
+    chess.ROOK: 5,
+    chess.BISHOP: 3,
+    chess.KNIGHT: 3,
+    chess.PAWN: 1,
+}
+
+
+def _pieces_to_speech(board, color, possessive="Your"):
+    """Spoken inventory of one side's pieces, grouped by type: 'Your pieces: King on g 1. Rooks on a 1 and f 1. ...'"""
+    parts = []
+    for piece_type in (chess.KING, chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN):
+        squares = [chess.square_name(sq) for sq in board.pieces(piece_type, color)]
+        if not squares:
+            continue
+        squares.sort()
+        spoken = [_square_to_speech(sq) for sq in squares]
+        singular, plural = _PIECE_SPEECH_NAMES[piece_type]
+        if len(spoken) == 1:
+            parts.append(f"{singular} on {spoken[0]}")
+        else:
+            parts.append(f"{plural} on {', '.join(spoken[:-1])} and {spoken[-1]}")
+    if not parts:
+        return f"{possessive} side has no pieces left."
+    return f"{possessive} pieces: " + ". ".join(parts) + "."
+
+
+def _square_query_to_speech(board, square_name):
+    """Answer 'what's on e4' for a single square."""
+    piece = board.piece_at(chess.parse_square(square_name))
+    spoken_sq = _square_to_speech(square_name)
+    if not piece:
+        return f"{spoken_sq} is empty."
+    color_name = "White" if piece.color == chess.WHITE else "Black"
+    piece_name = _PIECE_SPEECH_NAMES[piece.piece_type][0]
+    return f"On {spoken_sq}: {color_name} {piece_name}."
+
+
+def _last_move_to_speech(board):
+    """Spoken description of the most recent move, e.g. 'Black played Knight f 6.'"""
+    if not board.move_stack:
+        return "No moves have been played yet."
+    move = board.pop()
+    san = board.san(move)
+    mover = "White" if board.turn == chess.WHITE else "Black"
+    board.push(move)
+    return f"{mover} played {_san_to_speech(san)}."
+
+
+def _game_status_to_speech(board, caller_color):
+    """Whose turn, move number, material balance, and check status."""
+    caller_is_white = caller_color == chess.WHITE
+    parts = [f"You are playing {'White' if caller_is_white else 'Black'}."]
+    parts.append(f"Move {board.fullmove_number}.")
+
+    balance = 0
+    for piece_type, value in _PIECE_POINT_VALUES.items():
+        balance += value * (len(board.pieces(piece_type, chess.WHITE)) - len(board.pieces(piece_type, chess.BLACK)))
+    caller_balance = balance if caller_is_white else -balance
+    if caller_balance == 0:
+        parts.append("Material is equal.")
+    else:
+        direction = "up" if caller_balance > 0 else "down"
+        points = abs(caller_balance)
+        parts.append(f"You are {direction} {points} {'point' if points == 1 else 'points'} of material.")
+
+    if board.is_check():
+        parts.append("The side to move is in check.")
+    parts.append("It is your turn." if (board.turn == chess.WHITE) == caller_is_white else "Waiting for your opponent's move.")
+    return " ".join(parts)
+
+
+_BOARD_QUERY_HELP = (
+    "You can say a move like e4 or knight to f3. "
+    "Or ask: repeat position. opponent's pieces. what's on e4. last move. or game status. "
+    "On the keypad, press 1 to resign, 2 to offer a draw, 3 for a takeback."
+)
+
+
+def _detect_board_query(raw_speech, board, game, phone_clean):
+    """Detect a board-state question (not a move) in the caller's raw speech.
+
+    Runs on the uncleaned lowercased transcript, because the move-parsing cleanup
+    destroys the interrogative words this relies on. Returns spoken answer or None.
+    """
+    text = raw_speech.lower()
+
+    if any(kw in text for kw in ("help", "commands", "what can i say", "what can i do")):
+        return _BOARD_QUERY_HELP
+
+    if game.source == "voice_pvp":
+        caller_color = chess.WHITE if phone_clean == game.white_phone else chess.BLACK
+    else:
+        caller_color = chess.WHITE if (game.player_color or "white") == "white" else chess.BLACK
+
+    if any(kw in text for kw in ("last move", "previous move", "what did you play", "what was the move")):
+        return _last_move_to_speech(board)
+
+    if "opponent" in text and "piece" in text:
+        return _pieces_to_speech(board, not caller_color, possessive="Opponent's")
+
+    if any(kw in text for kw in ("repeat", "position", "read the board", "read board", "my pieces", "where are my")):
+        return _pieces_to_speech(board, caller_color)
+
+    if any(kw in text for kw in ("status", "whose turn", "who's turn", "material", "the score", "who is winning", "who's winning")):
+        return _game_status_to_speech(board, caller_color)
+
+    # Single-square query needs an interrogative plus a square, so bare squares still parse as moves
+    if "what" in text or "which" in text:
+        nato = {"alpha": "a", "bravo": "b", "charlie": "c", "delta": "d",
+                "echo": "e", "foxtrot": "f", "golf": "g", "hotel": "h"}
+        sq_text = text
+        for word, letter in nato.items():
+            sq_text = sq_text.replace(word, letter)
+        match = re.search(r"\b([a-h])\s?([1-8])\b", sq_text)
+        if match:
+            return _square_query_to_speech(board, match.group(1) + match.group(2))
+
+    return None
+
 
 def make_twiml_response(xml_content):
     # Standardize on a smooth, premium female neural voice for Twilio calls
@@ -1793,7 +1928,7 @@ def voice_call():
                 select(func.count(Game.id)).filter_by(user_phone=phone_clean)
             ).scalar()
             if total_games <= 1:
-                greeting = "Welcome to Chess Lens! I'm Thara, your chess companion. Quick tip: at any point during the game, you can press 1 to resign, press 2 to offer a draw, or press 3 to take back a move."
+                greeting = "Welcome to Chess Lens! I'm Thara, your chess companion. Quick tip: at any point during the game, you can press 1 to resign, press 2 to offer a draw, or press 3 to take back a move. You can also ask me to repeat the position, or say help to hear everything I understand."
             else:
                 greeting = "Welcome back! I'm Thara, your chess companion."
 
@@ -1932,6 +2067,20 @@ def process_voice_move():
             return make_twiml_response("<Say>No active game found. Let's start over.</Say><Redirect>/api/voice</Redirect>")
 
         board = _board_from_pgn(game.pgn)
+
+        # Board-state questions ("repeat position", "what's on e4") answer without
+        # consuming a move or disturbing any pending promotion/disambiguation state.
+        if not digits:
+            query_answer = _detect_board_query(speech, board, game, phone_clean)
+            if query_answer:
+                twiml = f"""
+                <Say>{_xml_escape(query_answer)}</Say>
+                <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="6" speechTimeout="auto">
+                    <Say>Go ahead.</Say>
+                </Gather>
+                <Redirect>/api/voice</Redirect>
+                """
+                return make_twiml_response(twiml)
 
         # Check if we are waiting for an ambiguous move resolution
         if game.pending_ambiguous_moves:
