@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
   <title>ChessNow — Call & Play Chess Hands-Free (Voice Hotline)</title>
   <meta name="description" content="Call +1-(4-CHESSNOW-3) to play chess by phone call using only your voice! The perfect hands-free chess hotline for blindfold training, walking, commuting, and accessibility."/>
-  <meta name="keywords" content="accessible chess, blind chess assistant, low vision chess game, hands-free chess for blind, play chess while driving, commuter chess game, hands-free voice chess, play chess on walking call, blindfold chess training tool, chess visualization trainer, calculate chess coordinates, screen-free chess drills, play chess over phone call, simple chess hotline, elderly accessible chess game, no install chess bot, voice chess, phone chess, hands-free chess, chess hotline, blindfold chess, accessibility, blind chess, ChessLens, Stockfish"/>
+  <meta name="keywords" content="accessible chess, blind chess assistant, low vision chess game, hands-free chess for blind, play chess while driving, commuter chess game, hands-free voice chess, play chess on walking call, blindfold chess training tool, chess visualization trainer, calculate chess coordinates, screen-free chess drills, play chess over phone call, simple chess hotline, elderly accessible chess game, no install chess bot, voice chess, phone chess, hands-free chess, chess hotline, blindfold chess, accessibility, blind chess, ChessNow, Stockfish"/>
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website"/>
@@ -27,7 +27,7 @@
     "@context": "https://schema.org",
     "@type": "WebApplication",
     "name": "ChessNow",
-    "alternateName": "ChessLens",
+    "alternateName": "ChessNow",
     "url": "https://chessnow.app",
     "applicationCategory": "GameApplication",
     "operatingSystem": "All",
@@ -170,7 +170,7 @@
 <!-- ── Onboarding Phone Auth Overlay ── -->
 <div id="auth-overlay" class="auth-overlay hidden">
   <div class="auth-card">
-    <h2>♟ Welcome to ChessLens</h2>
+    <h2>♟ Welcome to ChessNow</h2>
     <p id="auth-instruction">Enter your phone number to automatically save, sync, and review your games across web & voice.</p>
     <div class="auth-input-group" id="auth-phone-group">
       <label for="input-phone" class="sr-only">Phone Number</label>
@@ -230,9 +230,17 @@
 <header class="header">
   <nav aria-label="Primary" style="width: 100%;">
     <div class="header-inner">
-      <div class="logo" id="logo-btn" role="button" tabindex="0" aria-label="ChessLens Home">
+      <div class="logo" id="logo-btn" role="button" tabindex="0" aria-label="ChessNow Home">
         <span class="logo-icon" aria-hidden="true">♟</span>
-        <span class="logo-text">ChessLens</span>
+        <span class="logo-text">ChessNow</span>
+      </div>
+      <div class="nav-links">
+        <a href="#home" class="nav-link">Home</a>
+        <a href="#play" class="nav-link">Play Lobby</a>
+        <a href="#analysis" class="nav-link">Analyze</a>
+        <a href="#faq" class="nav-link">FAQ</a>
+        <a href="#voice-commands" class="nav-link">Voice Guide</a>
+        <a href="#about" class="nav-link">About</a>
       </div>
       <div id="header-username" class="header-user hidden"></div>
     </div>
@@ -336,7 +344,7 @@
   <section class="home-use-cases" id="section-use-cases">
     <div class="section-container">
       <h2 class="section-title">Designed for Every Player</h2>
-      <p class="section-subtitle">ChessLens Voice bridges accessibility, training, and gameplay for everyone.</p>
+      <p class="section-subtitle">ChessNow Voice bridges accessibility, training, and gameplay for everyone.</p>
       
       <div class="use-cases-grid">
         <!-- Card 1: Accessibility -->
@@ -872,6 +880,25 @@
 
       <h3>🚗 Built for Multitasking</h3>
       <p>Play chess while driving, commuting, exercising, cooking dinner, or resting your eyes. Plug in your headset, dial the hotline, and immerse yourself in the game without being tethered to a keyboard or screen.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── VIEW: DYNAMIC CONTENT OVERLAY ── -->
+<div id="view-content" class="view hidden">
+  <div class="page-header">
+    <div class="header-top-row">
+      <button class="back-btn" id="content-back">← Back</button>
+    </div>
+    <div>
+      <h2 id="content-title">Loading...</h2>
+      <p class="page-sub" id="content-subtitle">ChessNow Reference Guide</p>
+    </div>
+  </div>
+
+  <div class="about-section">
+    <div class="about-card" id="content-body" style="line-height: 1.7;">
+      <!-- Dynamic content injected here -->
     </div>
   </div>
 </div>

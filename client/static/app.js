@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   ChessLens — Frontend Application
+   ChessNow — Frontend Application
    Handles: view routing, Chess.com API calls,
             board rendering, analysis polling, charts
 ═══════════════════════════════════════════════════════ */
@@ -48,6 +48,113 @@ function showView(id) {
   });
 }
 
+// Function to load dynamic content without page reloads
+async function loadDynamicContent(path) {
+  const titleMap = {
+    "/faq": "Frequently Asked Questions",
+    "/accessibility": "Accessibility Statement",
+    "/guides/blindfold-chess": "Progressive Blindfold Guide",
+    "/guides/voice-commands": "Voice Commands Reference"
+  };
+  const fileMap = {
+    "/faq": "pages/faq.html",
+    "/accessibility": "pages/accessibility.html",
+    "/guides/blindfold-chess": "pages/blindfold-chess.html",
+    "/guides/voice-commands": "pages/voice-commands.html"
+  };
+
+  const normalizedPath = path.replace(/\/$/, "");
+  const filename = fileMap[normalizedPath];
+  const title = titleMap[normalizedPath] || "ChessNow Guide";
+
+  const contentTitle = $("content-title");
+  const contentBody = $("content-body");
+
+  if (!contentTitle || !contentBody) return;
+
+  contentTitle.textContent = title;
+  contentBody.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-2); font-family: var(--font-sans);">Loading content...</div>`;
+  showView("view-content");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  try {
+    const response = await fetch("/" + filename);
+    if (!response.ok) throw new Error("Failed to load page");
+    const htmlText = await response.text();
+    
+    // Parse HTML and extract content inside <main>
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlText, "text/html");
+    const mainContent = doc.querySelector("main");
+    
+    if (mainContent) {
+      // Remove H1 and description paragraph from injected content
+      const h1 = mainContent.querySelector("h1");
+      if (h1) h1.remove();
+      const p = mainContent.querySelector("main > p");
+      if (p) p.remove();
+      
+      // Update all brand text to ChessNow inside the parsed HTML
+      let contentHtml = mainContent.innerHTML;
+      contentHtml = contentHtml.replace(/ChessLens/g, "ChessNow");
+      contentBody.innerHTML = contentHtml;
+      
+      // Update links inside the dynamically loaded content to also intercept them!
+      contentBody.querySelectorAll("a[href]").forEach(link => {
+        const href = link.getAttribute("href");
+        if (href.startsWith("/faq") || href.startsWith("/accessibility") || href.startsWith("/guides/")) {
+          link.addEventListener("click", (e) => {
+            e.preventDefault();
+            const hash = href.replace("/guides/", "").replace("/", "");
+            window.location.hash = hash;
+          });
+        }
+      });
+    } else {
+      contentBody.innerHTML = `<div style="color: var(--inaccuracy); padding: 20px;">Could not locate main content block.</div>`;
+    }
+  } catch (error) {
+    console.error("Error loading dynamic content:", error);
+    contentBody.innerHTML = `<div style="color: var(--blunder); padding: 20px;">Error loading content. Please check your connection and try again.</div>`;
+  }
+}
+
+// Global hash routing controller
+function handleHashRouting() {
+  const hash = window.location.hash;
+  const hashRoutes = {
+    "#faq": "/faq",
+    "#accessibility": "/accessibility",
+    "#blindfold-chess": "/guides/blindfold-chess",
+    "#voice-commands": "/guides/voice-commands"
+  };
+
+  // Update active state visual indicators on header links
+  document.querySelectorAll(".nav-link").forEach(link => {
+    const href = link.getAttribute("href");
+    link.classList.toggle("active-link", href === hash || (hash === "" && href === "#home") || (hash === "#home" && href === "#home"));
+  });
+
+  if (hashRoutes[hash]) {
+    loadDynamicContent(hashRoutes[hash]);
+  } else if (hash === "#about") {
+    showView("view-about");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (hash === "#play") {
+    showView("view-play");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (hash === "#analysis") {
+    showView("view-analysis");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (hash === "#games") {
+    showView("view-games");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (hash === "#home" || !hash) {
+    showView("view-home");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
 // ── DOM shortcuts ──────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -63,7 +170,7 @@ async function customFetch(url) {
       const response = await window.Capacitor.Plugins.CapacitorHttp.get({
         url: url,
         headers: {
-          "User-Agent": "ChessLens/1.0.0 (contact: support@chesslens.app)"
+          "User-Agent": "ChessNow/1.0.0 (contact: support@chessnow.app)"
         }
       });
       return {
@@ -1949,18 +2056,33 @@ function initLandingPageListeners() {
   if (aboutLink) {
     aboutLink.addEventListener("click", (e) => {
       e.preventDefault();
-      showView("view-about");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      window.location.hash = "about";
     });
   }
 
   const aboutBackBtn = $("about-back");
   if (aboutBackBtn) {
     aboutBackBtn.addEventListener("click", () => {
-      showView("view-home");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      window.location.hash = "home";
     });
   }
+
+  const contentBackBtn = $("content-back");
+  if (contentBackBtn) {
+    contentBackBtn.addEventListener("click", () => {
+      window.location.hash = "home";
+    });
+  }
+
+  // Intercept all links pointing to guides/FAQ
+  document.querySelectorAll('a[href^="/faq"], a[href^="/accessibility"], a[href^="/guides/"]').forEach(link => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const href = link.getAttribute("href");
+      const hash = href.replace("/guides/", "").replace("/", "");
+      window.location.hash = hash;
+    });
+  });
 }
 
 // ── Init ───────────────────────────────────────────────
@@ -1969,6 +2091,10 @@ $("username-input").value = DEFAULT_USERNAME;
 initPhoneAuth();
 initVoiceCall();
 initLandingPageListeners();
+
+// Initialize dynamic SPA hash routing
+window.addEventListener("hashchange", handleHashRouting);
+handleHashRouting();
 
 (async () => {
   // Load configuration
