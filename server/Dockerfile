@@ -14,14 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy requirements and install python packages
-COPY requirements.txt .
+COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application files
-COPY . .
+# Copy server files and client static assets
+COPY server/ /app/server/
+COPY client/ /app/client/
 
 # Expose the Flask port (Render will dynamically route HTTP traffic here)
 EXPOSE 5174
 
-# Run the application
+# Run the application from within the server directory
+WORKDIR /app/server
 CMD ["python", "app.py"]
