@@ -1,19 +1,52 @@
-# Chess Analyzer
+# Chess Analyzer — Decoupled Architecture
 
-Flask app for chess game analysis with Stockfish, plus voice-call analysis via Twilio and an iOS wrapper via Capacitor.
+Decoupled codebase containing:
+1. **`client/`**: The client-side, local-first web/mobile chess analyzer (**ChessLens**) and iOS Capacitor wrapper.
+2. **`server/`**: The cloud-dependent telephony/voice bot platform (**Voice Chessbot**).
 
-## Stack
-- **Backend:** [app.py](app.py) — single Flask app (routes, WebSocket via flask-sock, Twilio voice, Whisper transcription). Models in [models.py](models.py) (SQLAlchemy; SQLite in `instance/`, psycopg2 available for Postgres).
-- **Frontend:** vanilla JS, no build step — [static/index.html](static/index.html), [static/app.js](static/app.js), [static/style.css](static/style.css). Client-side Stockfish WASM worker lives under `static/js/`.
-- **Analysis:** python-chess + Stockfish; results cached in `analysis_cache.json`.
-- **iOS:** Capacitor project in `ios/` (config: [capacitor.config.json](capacitor.config.json)); sync with `npx cap sync ios`.
+---
 
-## Run
-- Dev server: `python3 app.py` — port **5174** (preview config: `.claude/launch.json`, name `chess-analyzer`)
-- Env vars load from `.env` (python-dotenv). Never commit `.env`.
-- Deps: `pip install -r requirements.txt`
+## 📂 Codebase Structure
 
-## Conventions
-- Frontend is intentionally framework-free; don't introduce npm build tooling for UI changes.
-- Mobile/iOS quirks matter: WASM worker setup and piece rendering have had iOS-specific fixes — test mobile viewport when touching the board or worker code.
-- A repo split is under consideration — see [repository_split_analysis.md](repository_split_analysis.md) before large structural moves; known bugs tracked in [BUGFIX_PLAN.md](BUGFIX_PLAN.md).
+### 💻 Frontend Client (`client/`)
+* **Stack**: Vanilla HTML/JS, framework-free (no npm build steps).
+* **Assets**: [client/static/index.html](file:///Users/abhisheknagaraja/Documents/chess-analyzer/client/static/index.html), [client/static/app.js](file:///Users/abhisheknagaraja/Documents/chess-analyzer/client/static/app.js), [client/static/style.css](file:///Users/abhisheknagaraja/Documents/chess-analyzer/client/static/style.css).
+* **Stockfish**: Client-side Stockfish WASM worker lives in `client/static/js/`.
+* **Capacitor Mobile Config**: [client/capacitor.config.json](file:///Users/abhisheknagaraja/Documents/chess-analyzer/client/capacitor.config.json).
+* **Capacitor Commands**: All Capacitor CLI commands (e.g. `npx cap sync ios`) must be executed from **within the `client/` directory**.
+
+### 📞 Telephony Server (`server/`)
+* **Stack**: Python Flask API server + SQL database.
+* **Core files**: [server/app.py](file:///Users/abhisheknagaraja/Documents/chess-analyzer/server/app.py) (telephony voice webhooks, WebSockets, REST APIs), [server/models.py](file:///Users/abhisheknagaraja/Documents/chess-analyzer/server/models.py) (SQLAlchemy schemas).
+* **Database**: Local SQLite database resides in `server/instance/database.db` during development.
+* **Stockfish**: Uses a compiled native Stockfish binary on the host server for phone game engines.
+
+---
+
+## 🚀 Running & Developing Locally
+
+### Start the Python API Server
+Run the Flask server from within the `server/` directory:
+```bash
+cd server
+pip install -r requirements.txt
+python3 app.py
+```
+* **Port**: Runs on port **5174**.
+* **Development Static Route**: The Flask server dynamically falls back to serving static files from `../client/static` during local testing.
+* **Environment variables**: Loaded from `server/.env`. Never commit this file.
+
+### Mobile App Build & Sync
+Run from within the `client/` directory:
+```bash
+cd client
+npm install
+npx cap sync ios
+```
+
+---
+
+## 🎨 Design Conventions
+* **Framework-free**: The frontend UI is intentionally vanilla JS; do not introduce complex build tooling for layout tweaks.
+* **CORS Middleware**: Any new REST API route on the server must support CORS preflight and allowed origins to communicate with separate frontend client hosts in production.
+* **Mobile / WASM**: Test layout changes on mobile viewports as WebAssembly worker initializations have strict path rules on iOS.

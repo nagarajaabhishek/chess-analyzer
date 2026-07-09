@@ -33,12 +33,12 @@ from twilio.request_validator import RequestValidator
 load_dotenv()
 
 
-app = Flask(__name__, static_url_path="", static_folder="static")
+app = Flask(__name__, static_url_path="", static_folder="../client/static")
 sock = Sock(app)
 tasks = {}  # In-memory task store
 
 # ── Database Configuration ──
-from models import db, User, Game
+from models import db, User, Game, CallLog
 
 raw_db_url = os.environ.get("DATABASE_URL", "").strip()
 if raw_db_url:
@@ -70,6 +70,7 @@ with app.app_context():
             "draw_offered_by": "ALTER TABLE games ADD COLUMN draw_offered_by VARCHAR(30)",
             "pending_promotion_uci": "ALTER TABLE games ADD COLUMN pending_promotion_uci VARCHAR(5)",
             "pending_ambiguous_moves": "ALTER TABLE games ADD COLUMN pending_ambiguous_moves TEXT",
+            "pending_confirmation_uci": "ALTER TABLE games ADD COLUMN pending_confirmation_uci VARCHAR(5)",
             "player_color": "ALTER TABLE games ADD COLUMN player_color VARCHAR(5)",
             "last_activity_at": "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
             "white_acknowledged": "ALTER TABLE games ADD COLUMN white_acknowledged BOOLEAN DEFAULT FALSE",
@@ -88,7 +89,38 @@ with app.app_context():
         _existing_cols = {c["name"] for c in _inspector.get_columns("users")}
         if "elo" not in _existing_cols:
             db.session.execute(db.text("ALTER TABLE users ADD COLUMN elo INTEGER DEFAULT 1000"))
+
+    if "call_logs" in _inspector.get_table_names():
+        _existing_cols = {c["name"] for c in _inspector.get_columns("call_logs")}
+        if "call_type" not in _existing_cols:
+            db.session.execute(db.text("ALTER TABLE call_logs ADD COLUMN call_type VARCHAR(30)"))
             db.session.commit()
+
+@app.before_request
+def handle_options_preflight():
+    if request.method == "OPTIONS":
+        return app.make_default_options_response()
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin")
+    if origin:
+        allowed_origins = [
+            "https://chessnow.app",
+            "https://www.chessnow.app",
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174"
+        ]
+        if origin in allowed_origins or origin.endswith(".chessnow.app"):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+            response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS,PUT,DELETE"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
 
 # ── Twilio credentials (loaded from .env) ──
 # All Twilio REST calls and webhook-signature verification authenticate with the
@@ -97,6 +129,18 @@ with app.app_context():
 TWILIO_ACCOUNT_SID  = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN   = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "")
+
+# Bearer token for the read-only retention-metrics endpoint (/api/admin/metrics).
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+CHESS_VOCABULARY_HINTS = (
+    "pawn, knight, bishop, rook, queen, king, castle, takes, check, checkmate, "
+    "alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, "
+    "a1, a2, a3, a4, a5, a6, a7, a8, b1, b2, b3, b4, b5, b6, b7, b8, "
+    "c1, c2, c3, c4, c5, c6, c7, c8, d1, d2, d3, d4, d5, d6, d7, d8, "
+    "e1, e2, e3, e4, e5, e6, e7, e8, f1, f2, f3, f4, f5, f6, f7, f8, "
+    "g1, g2, g3, g4, g5, g6, g7, g8, h1, h2, h3, h4, h5, h6, h7, h8, "
+    "resign, draw, takeback, undo, repeat, position, last move, whose turn, status, help"
+)
 GEMINI_API_KEY      = os.environ.get("GEMINI_API_KEY", "")
 
 # Public base URL for game review links (override via BASE_URL env var)
@@ -376,14 +420,41 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/signup")
 def signup():
     # No separate signup flow exists — the phone-auth overlay on the homepage already
     # creates the account on submit, so this just points the post-game SMS link somewhere real.
-    return send_from_directory("static", "index.html")
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    return send_from_directory(app.static_folder, "robots.txt")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    return send_from_directory(app.static_folder, "sitemap.xml")
+
+
+@app.route("/faq")
+@app.route("/accessibility")
+@app.route("/guides/blindfold-chess")
+@app.route("/guides/voice-commands")
+def content_pages():
+    path_map = {
+        "/faq": "faq.html",
+        "/accessibility": "accessibility.html",
+        "/guides/blindfold-chess": "blindfold-chess.html",
+        "/guides/voice-commands": "voice-commands.html"
+    }
+    filename = path_map.get(request.path)
+    if filename:
+        return send_from_directory(os.path.join(app.static_folder, "pages"), filename)
+    return jsonify({"error": "Page not found"}), 404
 
 
 @app.route("/api/game/<game_id>")
@@ -987,6 +1058,98 @@ def _san_to_speech(san):
     return "".join(res).strip().replace("  ", " ")
 
 
+def _pieces_to_speech(board, color):
+    """List all pieces of a specific color, ordered K/Q/R/B/N/pawns."""
+    piece_names = [
+        (chess.KING, "King", "Kings"),
+        (chess.QUEEN, "Queen", "Queens"),
+        (chess.ROOK, "Rook", "Rooks"),
+        (chess.BISHOP, "Bishop", "Bishops"),
+        (chess.KNIGHT, "Knight", "Knights"),
+        (chess.PAWN, "pawn", "pawns"),
+    ]
+    parts = []
+    for piece_type, singular, plural in piece_names:
+        squares = sorted(list(board.pieces(piece_type, color)))
+        if not squares:
+            continue
+        sq_names = [chess.square_name(sq) for sq in squares]
+        if len(sq_names) == 1:
+            parts.append(f"{singular} on {sq_names[0]}")
+        elif len(sq_names) == 2:
+            parts.append(f"{plural} on {sq_names[0]} and {sq_names[1]}")
+        else:
+            parts.append(f"{plural} on {', '.join(sq_names[:-1])}, and {sq_names[-1]}")
+    return ", ".join(parts) if parts else "No pieces"
+
+
+def _square_query_to_speech(board, square):
+    """Retrieve color and type of the piece on a given square (e.g. 'e4: white pawn')."""
+    try:
+        sq_idx = chess.parse_square(square.lower().strip())
+    except ValueError:
+        return f"{square} is not a valid square"
+    piece = board.piece_at(sq_idx)
+    if not piece:
+        return f"{square} is empty"
+    color_str = "white" if piece.color == chess.WHITE else "black"
+    piece_names = {
+        chess.PAWN: "pawn",
+        chess.KNIGHT: "knight",
+        chess.BISHOP: "bishop",
+        chess.ROOK: "rook",
+        chess.QUEEN: "queen",
+        chess.KING: "king"
+    }
+    name = piece_names.get(piece.piece_type, "piece")
+    return f"{square}: {color_str} {name}"
+
+
+def _game_status_to_speech(board, game):
+    """Summarize whose turn it is, move number, material count difference, and check status."""
+    turn_str = "White to move" if board.turn == chess.WHITE else "Black to move"
+    move_num = board.fullmove_number
+    move_str = f"move {move_num}"
+    
+    check_str = ""
+    if board.is_check():
+        check_str = ", in check"
+        
+    values = {
+        chess.PAWN: 1,
+        chess.KNIGHT: 3,
+        chess.BISHOP: 3,
+        chess.ROOK: 5,
+        chess.QUEEN: 9,
+    }
+    w_mat = sum(len(board.pieces(pt, chess.WHITE)) * val for pt, val in values.items())
+    b_mat = sum(len(board.pieces(pt, chess.BLACK)) * val for pt, val in values.items())
+    
+    caller_color = game.player_color or "white"
+    if caller_color == "white":
+        diff = w_mat - b_mat
+    else:
+        diff = b_mat - w_mat
+        
+    if diff > 0:
+        mat_str = f"up {diff} in material"
+    elif diff < 0:
+        mat_str = f"down {abs(diff)} in material"
+    else:
+        mat_str = "even material"
+        
+    return f"{turn_str}, {move_str}, {mat_str}{check_str}"
+
+
+def _last_move_to_speech(board):
+    """Return the last played move formatted for speech."""
+    if not board.move_stack:
+        return "No moves have been played yet."
+    temp = board.copy()
+    move = temp.pop()
+    san = temp.san(move)
+    return _san_to_speech(san)
+
 
 def make_twiml_response(xml_content):
     # Standardize on a smooth, premium female neural voice for Twilio calls
@@ -1005,7 +1168,7 @@ def _twilio_request_is_valid():
     Returns True (skips verification) if TWILIO_AUTH_TOKEN isn't configured — a startup
     warning already flags that case so it isn't a silent gap.
     """
-    if not TWILIO_AUTH_TOKEN:
+    if app.config.get("TESTING") or not TWILIO_AUTH_TOKEN:
         return True
 
     validator = RequestValidator(TWILIO_AUTH_TOKEN)
@@ -1598,6 +1761,183 @@ def make_twiml_game_over_response(board, game, prefix=""):
 
 
 
+def _touch_call_log(phone_clean, game_id=None):
+    """Upsert the CallLog row for the current Twilio webhook.
+
+    First webhook of a call creates the row; every later webhook bumps ended_at so
+    duration can be estimated even if the status callback never fires. Must be
+    called inside an app context. No-op for requests without a CallSid (web UI).
+    """
+    call_sid = request.values.get("CallSid", "")
+    if not call_sid:
+        return
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    log = db.session.execute(select(CallLog).filter_by(call_sid=call_sid)).scalars().first()
+    if not log:
+        log = CallLog(id=str(uuid.uuid4()), call_sid=call_sid, phone_number=phone_clean, started_at=now, call_type="inbound")
+        db.session.add(log)
+    log.ended_at = now
+    if game_id and not log.game_id:
+        log.game_id = game_id
+    db.session.commit()
+
+
+@app.route("/api/voice/call_status", methods=["POST"])
+@twilio_webhook
+def voice_call_status():
+    """Twilio 'call status changes' webhook (configured on the phone number).
+
+    Delivers the authoritative CallDuration when the call completes.
+    """
+    call_sid = request.values.get("CallSid", "")
+    if not call_sid:
+        return ("", 204)
+    from_phone = request.values.get("From", "")
+    phone_clean = "".join(filter(str.isdigit, from_phone))
+    with app.app_context():
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        log = db.session.execute(select(CallLog).filter_by(call_sid=call_sid)).scalars().first()
+        if not log:
+            log = CallLog(id=str(uuid.uuid4()), call_sid=call_sid, phone_number=phone_clean or None, started_at=now, call_type="inbound")
+            db.session.add(log)
+        log.ended_at = now
+        log.hangup_reason = request.values.get("CallStatus", "") or None
+        duration = request.values.get("CallDuration", "")
+        if duration.isdigit():
+            log.duration_seconds = int(duration)
+        db.session.commit()
+    return ("", 204)
+
+
+@app.route("/api/admin/metrics", methods=["GET"])
+def admin_metrics():
+    """Retention metrics for the viability question: do people call back, and for how long?
+
+    Runs optimized SQLAlchemy queries for performant analytics.
+    """
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+
+    def _percentile(sorted_vals, pct):
+        if not sorted_vals:
+            return None
+        idx = min(len(sorted_vals) - 1, max(0, round(pct / 100 * (len(sorted_vals) - 1))))
+        return sorted_vals[idx]
+
+    with app.app_context():
+        now_time = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        def _get_metrics_for_period(start_time=None):
+            log_filter = []
+            game_filter = [Game.source.in_(["voice_bot", "voice_pvp"])]
+            if start_time:
+                log_filter.append(CallLog.started_at >= start_time)
+                game_filter.append(Game.created_at >= start_time)
+
+            # 1. Total calls
+            total_calls = db.session.execute(
+                select(func.count(CallLog.id)).filter(*log_filter)
+            ).scalar() or 0
+
+            # 2. Unique callers
+            unique_callers = db.session.execute(
+                select(func.count(CallLog.phone_number.distinct()))
+                .filter(CallLog.phone_number != None, *log_filter)
+            ).scalar() or 0
+
+            # 3. Repeat callers count (callers with >=2 calls)
+            repeat_subq = select(CallLog.phone_number)\
+                .filter(CallLog.phone_number != None, *log_filter)\
+                .group_by(CallLog.phone_number)\
+                .having(func.count(CallLog.id) >= 2)\
+                .subquery()
+            repeat_callers = db.session.execute(
+                select(func.count()).select_from(repeat_subq)
+            ).scalar() or 0
+            repeat_caller_rate = round(repeat_callers / unique_callers, 3) if unique_callers else None
+
+            # 4. Median & p90 call duration
+            duration_query = select(CallLog.duration_seconds, CallLog.started_at, CallLog.ended_at)\
+                .filter(or_(CallLog.duration_seconds != None, and_(CallLog.started_at != None, CallLog.ended_at != None)), *log_filter)
+            duration_rows = db.session.execute(duration_query).all()
+            durations = []
+            for row in duration_rows:
+                if row[0] is not None:
+                    durations.append(row[0])
+                elif row[1] and row[2]:
+                    durations.append(int((row[2] - row[1]).total_seconds()))
+            durations.sort()
+            median_duration = _percentile(durations, 50)
+            p90_duration = _percentile(durations, 90)
+
+            # 5. Games per caller
+            voice_games_count = db.session.execute(
+                select(func.count(Game.id)).filter(*game_filter)
+            ).scalar() or 0
+            game_players_count = db.session.execute(
+                select(func.count(Game.user_phone.distinct())).filter(Game.user_phone != None, *game_filter)
+            ).scalar() or 0
+            games_per_caller = round(voice_games_count / game_players_count, 2) if game_players_count else None
+
+            # 6. D7 Return Rate (Relative to the window end)
+            w1_start = now_time - timedelta(days=7)
+            w2_start = now_time - timedelta(days=14)
+            if start_time:
+                w1_start = max(w1_start, start_time)
+                w2_start = max(w2_start, start_time)
+                w1_end = now_time
+                w2_end = max(now_time - timedelta(days=7), start_time)
+            else:
+                w1_end = now_time
+                w2_end = now_time - timedelta(days=7)
+
+            prior_week_callers = set(db.session.execute(
+                select(CallLog.phone_number)
+                .filter(CallLog.phone_number != None, CallLog.started_at >= w2_start, CallLog.started_at < w2_end)
+                .distinct()
+            ).scalars().all())
+
+            this_week_callers = set(db.session.execute(
+                select(CallLog.phone_number)
+                .filter(CallLog.phone_number != None, CallLog.started_at >= w1_start, CallLog.started_at < w1_end)
+                .distinct()
+            ).scalars().all())
+            d7_return_rate = round(len(prior_week_callers & this_week_callers) / len(prior_week_callers), 3) if prior_week_callers else None
+
+            # 7. Hangup reasons
+            reasons_query = select(CallLog.hangup_reason, func.count(CallLog.id))\
+                .filter(CallLog.hangup_reason != None, *log_filter)\
+                .group_by(CallLog.hangup_reason)
+            reasons_rows = db.session.execute(reasons_query).all()
+            hangup_reasons = {row[0]: row[1] for row in reasons_rows}
+
+            finished_games_count = db.session.execute(
+                select(func.count(Game.id)).filter(Game.result != '*', Game.result != None, *game_filter)
+            ).scalar() or 0
+
+            return {
+                "total_calls": total_calls,
+                "unique_callers": unique_callers,
+                "repeat_caller_rate": repeat_caller_rate,
+                "median_call_duration_seconds": median_duration,
+                "p90_call_duration_seconds": p90_duration,
+                "d7_return_rate": d7_return_rate,
+                "voice_games_total": voice_games_count,
+                "voice_games_finished": finished_games_count,
+                "games_per_caller": games_per_caller,
+                "hangup_reasons": hangup_reasons,
+            }
+
+        all_time_metrics = _get_metrics_for_period(None)
+        last_30_days_metrics = _get_metrics_for_period(now_time - timedelta(days=30))
+
+        return jsonify({
+            **all_time_metrics,
+            "last_30_days": last_30_days_metrics
+        })
+
+
 @app.route("/api/voice", methods=["GET", "POST"])
 @twilio_webhook
 def voice_call():
@@ -1607,6 +1947,8 @@ def voice_call():
         phone_clean = "test_phone"
 
     with app.app_context():
+        _touch_call_log(phone_clean)
+
         user = db.session.get(User, phone_clean)
         is_new_user = False
         if not user:
@@ -1711,6 +2053,8 @@ def voice_call():
                 db.session.add(game)
                 db.session.commit()
 
+        _touch_call_log(phone_clean, game_id=game.id)
+
         user_color = game.player_color or "white"
         board = _board_from_pgn(game.pgn)
         
@@ -1731,7 +2075,7 @@ def voice_call():
             if turn_phone != phone_clean:
                 twiml = """
                 <Say>Waiting for your opponent to move. Press 1 to resign, press 2 to offer a draw, or call back shortly.</Say>
-                <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto">
+                <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto" hints="{CHESS_VOCABULARY_HINTS}">
                     <Say>Say anything to check again.</Say>
                 </Gather>
                 <Redirect>/api/voice</Redirect>
@@ -1851,7 +2195,7 @@ def voice_call():
         else:
             twiml = f"""
             <Say>{_xml_escape(msg)}</Say>
-            <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto">
+            <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto" hints="{CHESS_VOCABULARY_HINTS}">
                 <Say>Speak your move.</Say>
             </Gather>
             <Redirect>/api/voice</Redirect>
@@ -1927,11 +2271,73 @@ def process_voice_move():
         speech_clean = speech_clean.replace("h.four", "h4").replace("hfour", "h4")
 
     with app.app_context():
+        _touch_call_log(phone_clean)
+
         game = find_active_live_game(phone_clean)
         if not game:
             return make_twiml_response("<Say>No active game found. Let's start over.</Say><Redirect>/api/voice</Redirect>")
 
         board = _board_from_pgn(game.pgn)
+
+        # ── Intent Detection (Package 1) ──
+        if not digits:
+            intent_clean = speech.lower().replace(".", "").replace(",", "").replace("-", "")
+            # Normalize NATO phonetics and number formats for matching
+            intent_clean = intent_clean.replace("alpha", "a").replace("bravo", "b").replace("charlie", "c")
+            intent_clean = intent_clean.replace("delta", "d").replace("echo", "e").replace("foxtrot", "f")
+            intent_clean = intent_clean.replace("golf", "g").replace("hotel", "h")
+            intent_clean = intent_clean.replace("seefour", "c4").replace("seefive", "c5").replace("see4", "c4").replace("see5", "c5")
+            intent_clean = intent_clean.replace("before", "b4").replace("befour", "b4")
+            intent_clean = intent_clean.replace("d.four", "d4").replace("deefour", "d4").replace("deefive", "d5")
+            intent_clean = intent_clean.replace("e.four", "e4").replace("efour", "e4").replace("efive", "e5")
+            intent_clean = intent_clean.replace("eight", "a8").replace("eighty", "a8").replace("ate", "a8")
+            intent_clean = intent_clean.replace("f.four", "f4").replace("ffour", "f4").replace("ffive", "f5")
+            intent_clean = intent_clean.replace("g.four", "g4").replace("gfour", "g4")
+            intent_clean = intent_clean.replace("h.four", "h4").replace("hfour", "h4")
+
+            # 1. Caller's pieces
+            if any(k in intent_clean for k in ("repeat", "position", "read the board", "my pieces")):
+                caller_color = chess.WHITE if (game.player_color or "white") == "white" else chess.BLACK
+                pieces_str = _pieces_to_speech(board, caller_color)
+                res_speech = f"Your pieces: {pieces_str}."
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 2. Opponent's pieces
+            if any(k in intent_clean for k in ("opponent pieces", "opponents pieces", "opponent's pieces", "your pieces")):
+                bot_color = chess.BLACK if (game.player_color or "white") == "white" else chess.WHITE
+                pieces_str = _pieces_to_speech(board, bot_color)
+                res_speech = f"Opponent's pieces: {pieces_str}."
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 3. Square query (requires interrogative "what" or "which" and a square to avoid move hijacking)
+            if "what" in intent_clean or "which" in intent_clean or "whats" in intent_clean:
+                m = re.search(r'\b([a-h][1-8])\b', intent_clean)
+                if not m:
+                    m = re.search(r'([a-h][1-8])', intent_clean.replace(" ", ""))
+                if m:
+                    sq = m.group(1)
+                    res_speech = _square_query_to_speech(board, sq)
+                    return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 4. Last move
+            if any(k in intent_clean for k in ("last move", "previous move", "what did you play", "what did you move")):
+                res_speech = _last_move_to_speech(board)
+                if board.move_stack:
+                    temp = board.copy()
+                    temp.pop()
+                    player_name = "White" if temp.turn == chess.WHITE else "Black"
+                    res_speech = f"Last move: {player_name} played {res_speech}."
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 5. Game status / material count difference
+            if any(k in intent_clean for k in ("whose turn", "status", "score", "material", "who to move")):
+                res_speech = _game_status_to_speech(board, game)
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
+
+            # 6. Spoken help menu
+            if any(k in intent_clean for k in ("help", "commands", "what can i say", "what commands")):
+                res_speech = "You can say a move like, knight to f3, or castle. You can also ask, repeat position, what's on e4, last move, whose turn, or say resign, draw, or takeback."
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(res_speech)}</Redirect>")
 
         # Check if we are waiting for an ambiguous move resolution
         if game.pending_ambiguous_moves:
@@ -2147,8 +2553,22 @@ def process_voice_move():
                     
                     twiml = f"""
                     <Say>Which {_xml_escape(piece_name)}? The one on {_xml_escape(choices_str)}?</Say>
-                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto">
+                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto" hints="{CHESS_VOCABULARY_HINTS}">
                         <Say>Say the starting square, like {_xml_escape(sq_names[0])} or {_xml_escape(sq_names[1])}.</Say>
+                    </Gather>
+                    <Redirect>/api/voice</Redirect>
+                    """
+                    return make_twiml_response(twiml)
+                elif len(matching_moves) == 1:
+                    candidate_move = matching_moves[0]
+                    san = board.san(candidate_move)
+                    game.pending_confirmation_uci = candidate_move.uci()
+                    db.session.commit()
+                    
+                    twiml = f"""
+                    <Say>I heard {_xml_escape(_san_to_speech(san))}. Press 1 or say yes to play it, or say no to try again.</Say>
+                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/confirm_move" timeout="5" speechTimeout="auto" hints="yes, no, play, cancel, try again">
+                        <Say>Press 1 or say yes to play it, or say no to try again.</Say>
                     </Gather>
                     <Redirect>/api/voice</Redirect>
                     """
@@ -2250,6 +2670,64 @@ def process_voice_promotion():
             game.pending_promotion_uci = None
             db.session.commit()
             return make_twiml_response("<Say>That move is no longer legal. Let's try again.</Say><Redirect>/api/voice</Redirect>")
+
+
+@app.route("/api/voice/confirm_move", methods=["POST"])
+@twilio_webhook
+def voice_confirm_move():
+    """Handles confirmation of fallback-parsed moves (low confidence)."""
+    from_phone = request.values.get("From", "")
+    phone_clean = "".join(filter(str.isdigit, from_phone))
+    if not phone_clean:
+        phone_clean = "test_phone"
+
+    digits = request.values.get("Digits", "").strip()
+    speech = request.values.get("SpeechResult", "").strip().lower()
+
+    is_yes = (digits == "1") or ("yes" in speech) or ("yeah" in speech) or ("sure" in speech) or ("play" in speech)
+    is_no = (digits == "2") or ("no" in speech) or ("cancel" in speech) or ("try again" in speech)
+
+    with app.app_context():
+        _touch_call_log(phone_clean)
+        game = find_active_live_game(phone_clean)
+        if not game or not game.pending_confirmation_uci:
+            return make_twiml_response("<Say>Sorry, I couldn't find your pending move. Let's try again.</Say><Redirect>/api/voice</Redirect>")
+
+        board = _board_from_pgn(game.pgn)
+        move_uci = game.pending_confirmation_uci
+        
+        # Clear it immediately so it doesn't linger
+        game.pending_confirmation_uci = None
+        db.session.commit()
+
+        if is_yes:
+            move = chess.Move.from_uci(move_uci)
+            if move in board.legal_moves:
+                played_san = board.san(move)
+                board.push(move)
+                _save_pgn(game, board)
+
+                if board.is_game_over():
+                    res = board.result()
+                    game.result = res
+                    _finalize_pvp_game_acknowledgment(game, phone_clean)
+                    db.session.commit()
+                    return make_twiml_game_over_response(board, game, prefix=f"Ok, you played {_san_to_speech(played_san)}.")
+
+                played_san_speech = _san_to_speech(played_san)
+                say_msg = f"Ok, you played {played_san_speech}."
+                if board.is_check():
+                    say_msg += ", check"
+                
+                if game.source == "voice_pvp":
+                    say_msg += " Waiting for your opponent."
+                
+                db.session.commit()
+                return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(say_msg)}</Redirect>")
+            else:
+                return make_twiml_response("<Say>That move is no longer legal. Let's try again.</Say><Redirect>/api/voice</Redirect>")
+        else:
+            return make_twiml_response("<Say>Okay, let's try again.</Say><Redirect>/api/voice</Redirect>")
 
 
 @app.route("/api/voice/play_again", methods=["POST"])

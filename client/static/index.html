@@ -3,9 +3,151 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
-  <title>ChessLens Voice — Call and Play Chess Hands-Free</title>
-  <meta name="description" content="Call +1-(4-CHESSNOW-3) to play chess by phone! Fully voice-controlled chess hotline for blindfold training, hands-free play, low-vision accessibility, and local game analysis."/>
+  <title>ChessNow — Call & Play Chess Hands-Free (Voice Hotline)</title>
+  <meta name="description" content="Call +1-(4-CHESSNOW-3) to play chess by phone call using only your voice! The perfect hands-free chess hotline for blindfold training, walking, commuting, and accessibility."/>
   <meta name="keywords" content="accessible chess, blind chess assistant, low vision chess game, hands-free chess for blind, play chess while driving, commuter chess game, hands-free voice chess, play chess on walking call, blindfold chess training tool, chess visualization trainer, calculate chess coordinates, screen-free chess drills, play chess over phone call, simple chess hotline, elderly accessible chess game, no install chess bot, voice chess, phone chess, hands-free chess, chess hotline, blindfold chess, accessibility, blind chess, ChessLens, Stockfish"/>
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="https://chessnow.app/"/>
+  <meta property="og:title" content="ChessNow — Call & Play Chess Hands-Free (Voice Hotline)"/>
+  <meta property="og:description" content="Play chess by phone using only your voice! Hands-free chess hotline for blindfold training, walking, commuting, and accessibility."/>
+  <meta property="og:image" content="https://chessnow.app/og-image.png"/>
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image"/>
+  <meta property="twitter:url" content="https://chessnow.app/"/>
+  <meta property="twitter:title" content="ChessNow — Call & Play Chess Hands-Free (Voice Hotline)"/>
+  <meta property="twitter:description" content="Play chess by phone using only your voice! Hands-free chess hotline for blindfold training, walking, commuting, and accessibility."/>
+  <meta property="twitter:image" content="https://chessnow.app/og-image.png"/>
+
+  <!-- JSON-LD Structured Data for WebApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "ChessNow",
+    "alternateName": "ChessLens",
+    "url": "https://chessnow.app",
+    "applicationCategory": "GameApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires HTML5, Javascript, and Web Speech API or phone line connection.",
+    "accessibilityFeature": [
+      "alternativeText",
+      "screenReaderFriendly",
+      "structuralNavigation",
+      "voiceControl"
+    ],
+    "description": "Voice-controlled chess hotline enabling blind, low-vision, and blindfold training players to play chess entirely hands-free and screen-free over a phone call.",
+    "screenshot": "https://chessnow.app/og-image.png"
+  }
+  </script>
+
+  <!-- JSON-LD Structured Data for FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "How do I start a game on ChessNow?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Simply call our phone hotline at +1-(4-CHESSNOW-3) to start playing immediately against our chess engine, Thara, or a friend via PvP. No app download or account creation required."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What does it cost to use ChessNow?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ChessNow is completely free to use. You only pay for standard local/long-distance phone call rates as charged by your phone service provider."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What phones are supported?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ChessNow works on any phone, including landlines, basic flip phones, and smartphones. There is no internet connection or app installation required to play."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I speak my chess moves?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Speak moves using Standard Algebraic Notation (SAN) like 'e4', 'Knight to f3', 'Castle kingside', or specify coordinates like 'e2 to e4'. You can also use the NATO phonetic alphabet (e.g., 'Echo four')."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What if ChessNow mishears my move?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ChessNow uses robustness checks. If a move is uncertain or matches piece+target fallback patterns, it asks you to confirm. You can say 'no' to cancel and try again."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I play against a friend?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes! You can initiate a Player vs Player (PvP) game from our website lobby, send a game link to a friend, and play with each other over the phone line."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does the rating system work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ChessNow maintains a standard Elo-style rating for your phone number. Your rating increases or decreases based on your performance against Thara or other players."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I see my games after playing?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Every game is saved. You will receive an SMS recap link, and if you sync your phone number with our companion website, you can review all past games on an interactive board."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is my game analyzed by Stockfish?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, our companion website offers complete engine analysis, including move evaluation (accuracy, blunders, mistakes, best moves) powered by Stockfish."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What should screen-reader users know about the site?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The companion website is fully optimized for screen readers like JAWS and NVDA, featuring keyboard navigation skip-links, ARIA landmarks, form labels, and focus visibility."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is ChessNow available outside the United States?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Currently, our primary voice hotline supports callers from the US and Canada. We plan to expand support to international numbers in the future."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Who is Thara?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Thara is our custom AI chess companion who plays moves, tracks game status, and provides personalized, real-time audio commentary on your game."
+        }
+      }
+    ]
+  }
+  </script>
 
   <!-- Favicon -->
   <link rel="icon" type="image/x-icon" href="favicon.ico"/>
@@ -23,15 +165,19 @@
 </head>
 <body>
 
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
 <!-- ── Onboarding Phone Auth Overlay ── -->
 <div id="auth-overlay" class="auth-overlay hidden">
   <div class="auth-card">
     <h2>♟ Welcome to ChessLens</h2>
     <p id="auth-instruction">Enter your phone number to automatically save, sync, and review your games across web & voice.</p>
     <div class="auth-input-group" id="auth-phone-group">
+      <label for="input-phone" class="sr-only">Phone Number</label>
       <input type="tel" id="input-phone" placeholder="e.g. 5551234567" required>
     </div>
     <div class="auth-input-group hidden" id="auth-otp-group">
+      <label for="input-otp" class="sr-only">Verification Code</label>
       <input type="text" id="input-otp" placeholder="Enter 6-digit verification code" maxlength="6" style="text-align: center; font-size: 18px; letter-spacing: 2px;">
     </div>
     <button id="btn-submit-auth" class="btn btn-auth">Get Started</button>
@@ -50,11 +196,11 @@
     </div>
   </div>
   <div class="call-details">
-    <h2 id="call-status">Dialing Coach...</h2>
+    <h2 id="call-status" aria-live="polite" role="status">Dialing Coach...</h2>
     <p id="call-subtext">Speak your moves clearly (e.g. "E4", "Knight to F3", or "E2 to E4")</p>
     <p class="call-privacy-note">🌐 Voice calls use your browser's cloud speech recognition — unlike game analysis, this is not processed locally.</p>
   </div>
-  <div class="call-feedback-bubble" id="call-feedback">"Waiting for speech..."</div>
+  <div class="call-feedback-bubble" id="call-feedback" aria-live="polite" role="status">"Waiting for speech..."</div>
 
   <!-- On-screen equivalents of the phone-keypad shortcuts (1=resign, 2=draw, 3=takeback) —
        a browser/mobile caller has no keypad to press, so give them buttons instead. -->
@@ -67,13 +213,14 @@
   <!-- Fallback move entry for browsers/devices without SpeechRecognition (notably iOS/Safari,
        which WebKit has never implemented) — auto-shown in that case, always available otherwise. -->
   <div class="call-text-fallback hidden" id="call-text-fallback">
+    <label for="call-text-input" class="sr-only">Type your move</label>
     <input type="text" id="call-text-input" placeholder="Type your move, e.g. Nf3" autocomplete="off"/>
     <button id="btn-call-text-send">Send</button>
   </div>
 
   <div class="call-controls">
-    <button class="btn-mute" id="btn-call-mute" title="Toggle Mute">🎙️</button>
-    <button class="btn-hangup" id="btn-call-hangup" title="Hang Up">📞</button>
+    <button class="btn-mute" id="btn-call-mute" title="Toggle Mute" aria-label="Mute Microphone">🎙️</button>
+    <button class="btn-hangup" id="btn-call-hangup" title="Hang Up" aria-label="Hang Up">📞</button>
   </div>
 </div>
 
@@ -81,15 +228,18 @@
      HEADER
 ═══════════════════════════════════════════ -->
 <header class="header">
-  <div class="header-inner">
-    <div class="logo" id="logo-btn">
-      <span class="logo-icon">♟</span>
-      <span class="logo-text">ChessLens</span>
+  <nav aria-label="Primary" style="width: 100%;">
+    <div class="header-inner">
+      <div class="logo" id="logo-btn" role="button" tabindex="0" aria-label="ChessLens Home">
+        <span class="logo-icon" aria-hidden="true">♟</span>
+        <span class="logo-text">ChessLens</span>
+      </div>
+      <div id="header-username" class="header-user hidden"></div>
     </div>
-    <div id="header-username" class="header-user hidden"></div>
-  </div>
+  </nav>
 </header>
 
+<main id="main-content">
 <!-- ── VIEW: HOME ── -->
 <div id="view-home" class="view active">
   
@@ -169,6 +319,19 @@
     </div>
   </section>
 
+  <!-- TRUST STRIP -->
+  <section class="trust-strip">
+    <div class="trust-strip-inner">
+      <span class="trust-item">⚡ Works on any phone</span>
+      <span class="trust-divider">|</span>
+      <span class="trust-item">📱 No app to install</span>
+      <span class="trust-divider">|</span>
+      <span class="trust-item">🔒 No account needed</span>
+      <span class="trust-divider">|</span>
+      <span class="trust-item">☎️ Flip phones & landlines welcome</span>
+    </div>
+  </section>
+
   <!-- 2.3 DESIGNED FOR EVERY PLAYER (USE CASES) -->
   <section class="home-use-cases" id="section-use-cases">
     <div class="section-container">
@@ -181,6 +344,7 @@
           <div class="use-case-icon-box">♿</div>
           <h3>Visually Impaired & Accessibility</h3>
           <p class="use-case-description">Play screen-free chess without clumsy touchscreens or screen readers. Speak moves naturally and hear audio feedback from Thara.</p>
+          <a href="/accessibility" class="use-case-link" style="margin-top: 12px; display: inline-block; color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 500;">Learn about accessibility support →</a>
           <div class="use-case-keywords">
             <span class="keyword-tag">accessible chess</span>
             <span class="keyword-tag">blind chess assistant</span>
@@ -207,6 +371,7 @@
           <div class="use-case-icon-box">🧠</div>
           <h3>Blindfold & Visualization</h3>
           <p class="use-case-description">Train calculation and board visualization in your head. Memorize coordinates and mimic grandmaster blindfold training.</p>
+          <a href="/guides/blindfold-chess" class="use-case-link" style="margin-top: 12px; display: inline-block; color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 500;">Read blindfold training guide →</a>
           <div class="use-case-keywords">
             <span class="keyword-tag">blindfold chess training tool</span>
             <span class="keyword-tag">chess visualization trainer</span>
@@ -257,6 +422,7 @@
           <div class="search-row">
             <div class="input-wrap">
               <span class="input-icon">♙</span>
+              <label for="username-input" class="sr-only">Chess.com username</label>
               <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="off" spellcheck="false"/>
             </div>
             <button id="load-btn" class="btn btn-primary">
@@ -273,15 +439,16 @@
   </section>
 
   <!-- FOOTER -->
-  <footer class="footer">
+  <footer class="footer" role="contentinfo">
     <div class="footer-inner">
-      <p class="footer-copy">&copy; 2026 ChessLens. All rights reserved.</p>
+      <p class="footer-copy">&copy; 2026 ChessNow. All rights reserved.</p>
       <div class="footer-links">
-        <a href="#" class="footer-link" id="footer-link-home">Home</a>
-        <a href="#section-how-it-works" class="footer-link" id="footer-link-how">How it Works</a>
-        <a href="#section-live-games" class="footer-link" id="footer-link-live">Live Games</a>
+        <a href="/" class="footer-link">Home</a>
+        <a href="/faq" class="footer-link">FAQ</a>
+        <a href="/accessibility" class="footer-link">Accessibility</a>
+        <a href="/guides/blindfold-chess" class="footer-link">Blindfold Guide</a>
+        <a href="/guides/voice-commands" class="footer-link">Voice Reference</a>
         <a href="#section-analysis" class="footer-link" id="footer-link-analysis">Analyzer</a>
-        <a href="#" class="footer-link" id="footer-link-about">About</a>
       </div>
     </div>
   </footer>
@@ -323,6 +490,7 @@
       <h3>♟️ Challenge a Friend</h3>
       <p>Enter their phone number — they'll play Black when they call in.</p>
       <div class="pvp-challenge-row">
+        <label for="pvp-opponent-phone" class="sr-only">Opponent phone number</label>
         <input type="tel" id="pvp-opponent-phone" placeholder="Opponent phone number" autocomplete="off"/>
         <button id="btn-send-challenge" class="btn btn-primary">Challenge</button>
       </div>
@@ -683,27 +851,31 @@
       <button class="back-btn" id="about-back">← Back</button>
     </div>
     <div>
-      <h2>About ChessLens Voice</h2>
-      <p class="page-sub">Hands-Free Chess Powered by Telephony & AI</p>
+      <h2>About ChessNow</h2>
+      <p class="page-sub">The Screen-Free, Voice-Controlled Chess Hotline</p>
     </div>
   </div>
 
   <div class="about-section">
     <div class="about-card">
-      <h3>♟️ What is ChessLens Voice?</h3>
-      <p>ChessLens Voice is a privacy-focused local chess client and voice-gaming platform. It allows users to play complete chess games over a traditional phone call—completely hands-free, no screens required.</p>
-      
-      <h3>🤖 AI Chess Assistant: Thara</h3>
-      <p>Thara is your interactive chess companion and coach. She transcribes your spoken moves in real-time, validates them using a rules engine, and responds with natural audio commentary. Thara matches your Elo rating dynamically and adds personality to every game.</p>
-      
-      <h3>🔄 Real-Time Dashboard Sync</h3>
-      <p>When you call the hotline, you can keep this web dashboard open. The digital board automatically reflects the moves on the call as they happen. Anyone can spectate active games in progress via the live games feed.</p>
-      
-      <h3>🔒 Local Stockfish Engine</h3>
-      <p>In addition to voice games, ChessLens features local profile analysis. Import games from Chess.com and run deep game analysis with Stockfish 18 running locally in your browser via WebAssembly (or via a local binary in a self-hosted server). Your data never leaves your computer.</p>
+      <h3>♟️ Why Voice Chess?</h3>
+      <p>Traditional digital chess interfaces rely on screens, touch coordinates, and precise mouse movements. ChessNow shifts the game to the telephone network. By dialing <strong>+1-(4-CHESSNOW-3)</strong>, you can play complete games entirely hands-free and screen-free from any phone—whether it's a landline, a flip phone, or a modern smartphone.</p>
+
+      <h3>🤖 Natural Speech vs. "NATO Code"</h3>
+      <p>Most voice-controlled applications fail because speech recognizers struggle to differentiate coordinate letters (like mistaking "D4" for "E4" or "B4"), forcing players to speak in military code (<em>"Echo 4", "Delta 5"</em>). ChessNow's AI companion, <strong>Thara</strong>, is built for natural dialogue. Speak normally—say <em>"e4"</em>, <em>"Knight to f3"</em>, or <em>"takes takes"</em>. If a move is ambiguous or heard with low confidence, Thara will conversationally ask you to confirm: <em>"Did you mean Knight to c3?"</em></p>
+
+      <h3>🧠 Progressive Blindfold & Visualization Training</h3>
+      <p>For sighted players looking to improve calculation, spatial memory, and board visualization, screen-free chess is the ultimate training tool. ChessNow lets you practice blindfold play incrementally. Start by keeping this web dashboard open as a visual cue, progress to peeking only when lost, and eventually transition to pure auditory play, using voice commands like <em>"repeat position"</em> or <em>"what's on e4"</em> to check your mental board state.</p>
+
+      <h3>♿ Screen-Free Accessibility</h3>
+      <p>For visually impaired, blind, or motor-disabled players, screen readers and grid keyboard shortcuts are often clumsy and exhausting. ChessNow provides a barrier-free, plug-and-play hotline. The telephony line and natural voice loop bypass complex assistive tech interfaces, making chess accessible to everyone.</p>
+
+      <h3>🚗 Built for Multitasking</h3>
+      <p>Play chess while driving, commuting, exercising, cooking dinner, or resting your eyes. Plug in your headset, dial the hotline, and immerse yourself in the game without being tethered to a keyboard or screen.</p>
     </div>
   </div>
 </div>
+</main>
 
 <!-- Scripts -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
