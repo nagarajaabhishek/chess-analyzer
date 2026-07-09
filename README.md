@@ -1,4 +1,4 @@
-# ChessLens — Free Local Chess Analyzer
+# ChessNow — Free Local Chess Analyzer
 
 Analyse your Chess.com games locally with Stockfish. No paywall, no ads, no cloud.
 

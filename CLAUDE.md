@@ -1,8 +1,10 @@
 # Chess Analyzer — Decoupled Architecture
 
+> **Official product name: ChessNow.** All user-facing copy (web, voice prompts, SMS, App Store) says **ChessNow**. "ChessLens" and "Voice Chessbot" are retired codenames — do not reintroduce them. Exception: the iOS bundle ID `com.abhisheknagaraja.chesslens` is permanent and must never change.
+
 Decoupled codebase containing:
-1. **`client/`**: The client-side, local-first web/mobile chess analyzer (**ChessLens**) and iOS Capacitor wrapper.
-2. **`server/`**: The cloud-dependent telephony/voice bot platform (**Voice Chessbot**).
+1. **`client/`**: The client-side, local-first web/mobile chess analyzer (**ChessNow Analyzer**) and iOS Capacitor wrapper.
+2. **`server/`**: The cloud-dependent telephony/voice bot platform (**ChessNow Voice**).
 
 ---
 

@@ -144,7 +144,7 @@ CHESS_VOCABULARY_HINTS = (
 GEMINI_API_KEY      = os.environ.get("GEMINI_API_KEY", "")
 
 # Public base URL for game review links (override via BASE_URL env var)
-BASE_URL = os.environ.get("BASE_URL", "https://chesslens.app")
+BASE_URL = os.environ.get("BASE_URL", "https://chessnow.app")
 
 if not TWILIO_AUTH_TOKEN:
     print("⚠️  TWILIO_AUTH_TOKEN not set — incoming Twilio webhook requests will NOT be "
@@ -834,7 +834,7 @@ def auth_phone():
         else:
             # Send real SMS verification code via Twilio API
             to_e164 = f"+{phone_clean}" if phone_clean.startswith("1") else f"+1{phone_clean}"
-            body = f"♟ ChessLens verification code: {otp_code}"
+            body = f"♟ ChessNow verification code: {otp_code}"
             try:
                 resp = requests.post(
                     f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
@@ -1244,7 +1244,7 @@ def send_postgame_sms(to_phone: str, game_id: str, result_speech: str, move_coun
 
     review_url = f"{BASE_URL}/?game={game_id}"
     body = (
-        f"♟ Chess Lens recap — {result_speech.strip()} "
+        f"♟ ChessNow recap — {result_speech.strip()} "
         f"({move_count} move{'s' if move_count != 1 else ''}). "
         f"Review your game: {review_url} "
         f"| Create a free account to track your Elo history: {BASE_URL}/signup"
@@ -1754,7 +1754,7 @@ def make_twiml_game_over_response(board, game, prefix=""):
     <Gather input="dtmf speech" numDigits="1" action="/api/voice/play_again" timeout="5" speechTimeout="auto">
         <Say>Say yes or press 1 to play again, or say no or hang up to end the call.</Say>
     </Gather>
-    <Say>Thank you for playing Chess Lens. Goodbye.</Say>
+    <Say>Thank you for playing ChessNow. Goodbye.</Say>
     <Hangup/>
     """
     return make_twiml_response(twiml)
@@ -1994,7 +1994,7 @@ def voice_call():
                 <Gather input="dtmf speech" numDigits="1" action="/api/voice/play_again" timeout="5" speechTimeout="auto">
                     <Say>Say yes or press 1 to play again, or say no or hang up to end the call.</Say>
                 </Gather>
-                <Say>Thank you for playing Chess Lens. Goodbye.</Say>
+                <Say>Thank you for playing ChessNow. Goodbye.</Say>
                 <Hangup/>
                 """
                 return make_twiml_response(twiml)
@@ -2137,7 +2137,7 @@ def voice_call():
                 select(func.count(Game.id)).filter_by(user_phone=phone_clean)
             ).scalar()
             if total_games <= 1:
-                greeting = "Welcome to Chess Lens! I'm Thara, your chess companion. Quick tip: at any point during the game, you can press 1 to resign, press 2 to offer a draw, or press 3 to take back a move."
+                greeting = "Welcome to ChessNow! I'm Thara, your chess companion. Quick tip: at any point during the game, you can press 1 to resign, press 2 to offer a draw, or press 3 to take back a move."
             else:
                 greeting = "Welcome back! I'm Thara, your chess companion."
 
@@ -2407,7 +2407,7 @@ def process_voice_move():
             <Gather input="dtmf speech" numDigits="1" action="/api/voice/play_again" timeout="5" speechTimeout="auto">
                 <Say>Say yes or press 1 to play again, or say no or hang up to end the call.</Say>
             </Gather>
-            <Say>Thank you for playing Chess Lens. Goodbye.</Say>
+            <Say>Thank you for playing ChessNow. Goodbye.</Say>
             <Hangup/>
             """
             return make_twiml_response(twiml)
@@ -2424,7 +2424,7 @@ def process_voice_move():
                 <Gather input="dtmf speech" numDigits="1" action="/api/voice/play_again" timeout="5" speechTimeout="auto">
                     <Say>Say yes or press 1 to play again, or say no or hang up to end the call.</Say>
                 </Gather>
-                <Say>Thank you for playing Chess Lens. Goodbye.</Say>
+                <Say>Thank you for playing ChessNow. Goodbye.</Say>
                 <Hangup/>
                 """
                 return make_twiml_response(twiml)
@@ -2445,7 +2445,7 @@ def process_voice_move():
                 <Gather input="dtmf speech" numDigits="1" action="/api/voice/play_again" timeout="5" speechTimeout="auto">
                     <Say>Say yes or press 1 to play again, or say no or hang up to end the call.</Say>
                 </Gather>
-                <Say>Thank you for playing Chess Lens. Goodbye.</Say>
+                <Say>Thank you for playing ChessNow. Goodbye.</Say>
                 <Hangup/>
                 """
                 return make_twiml_response(twiml)
@@ -2749,7 +2749,7 @@ def voice_play_again():
                 db.session.commit()
         return make_twiml_response("<Say>Starting a new game.</Say><Redirect>/api/voice</Redirect>")
     else:
-        return make_twiml_response("<Say>Thank you for playing Chess Lens. Goodbye.</Say><Hangup/>")
+        return make_twiml_response("<Say>Thank you for playing ChessNow. Goodbye.</Say><Hangup/>")
 
 
 if __name__ == "__main__":
