@@ -2210,6 +2210,20 @@ def voice_call():
                     is_new_user = True
 
                 elo_raw = request.args.get("elo", request.form.get("elo", ""))
+
+                # First call ever: one calibration question so a 1700 player doesn't
+                # get a patronizing first game and a beginner doesn't get crushed.
+                # Skipped when the web lobby already supplies an explicit elo.
+                calibrated = request.values.get("calibrated", "")
+                if is_new_user and not calibrated and not elo_raw.isdigit():
+                    twiml = """
+                    <Say>Welcome to ChessNow! I'm Thara, your chess companion. So I can match your strength: are you new to chess, a casual player, or a rated player? Press 1 for new, 2 for casual, or 3 for rated.</Say>
+                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/calibrate" timeout="6" speechTimeout="auto" hints="new, beginner, casual, rated, experienced">
+                        <Say>Say new, casual, or rated. Or press 1, 2, or 3.</Say>
+                    </Gather>
+                    <Redirect>/api/voice?calibrated=skip</Redirect>
+                    """
+                    return make_twiml_response(twiml)
                 if elo_raw.isdigit():
                     bot_elo = int(elo_raw)
                 else:
@@ -2219,7 +2233,9 @@ def voice_call():
                 bot_name = f"Thara ({bot_elo})"
                 personality = request.values.get("personality", request.args.get("personality", "formal"))
 
-                user_color = random.choice(["white", "black"])
+                # First-timers act (White) instead of reacting — one less thing to
+                # process while they're still learning the voice interface.
+                user_color = "white" if is_new_user else random.choice(["white", "black"])
                 if user_color == "white":
                     white_phone = phone_clean
                     black_phone = None
@@ -2333,7 +2349,14 @@ def voice_call():
                 select(func.count(Game.id)).filter_by(user_phone=phone_clean)
             ).scalar()
             if total_games <= 1:
-                greeting = "Welcome to ChessNow! I'm Thara, your chess companion. Quick tip: at any point during the game, you can press 1 to resign, press 2 to offer a draw, or press 3 to take back a move."
+                if request.values.get("calibrated"):
+                    # Thara already introduced herself in the calibration question
+                    greeting = ("Let's play! To make a move, just say it — like, pawn to e 4, or, knight f 3. "
+                                "Say help anytime, or press 1 to resign, 2 to offer a draw, 3 to take back a move.")
+                else:
+                    greeting = ("Welcome to ChessNow! I'm Thara, your chess companion. "
+                                "To make a move, just say it — like, pawn to e 4, or, knight f 3. "
+                                "Say help anytime to hear what you can do, or press 1 to resign, 2 to offer a draw, 3 to take back a move.")
             else:
                 greeting = "Welcome back! I'm Thara, your chess companion."
 
@@ -2420,6 +2443,49 @@ def _parse_piece_and_target(speech_clean):
         piece = chess.KING
         
     return piece, target_sq
+
+
+@app.route("/api/voice/calibrate", methods=["GET", "POST"])
+@twilio_webhook
+def voice_calibrate():
+    """First-call strength calibration: seed Elo at 800/1200/1600 instead of a
+    flat 1000. Only ever seeds before the first game — never clobbers a real rating."""
+    from_phone = request.values.get("From", "")
+    phone_clean = "".join(filter(str.isdigit, from_phone))
+    if not phone_clean:
+        phone_clean = "test_phone"
+
+    digits = request.values.get("Digits", "").strip()
+    speech = request.values.get("SpeechResult", "").strip().lower()
+
+    seed, label = None, None
+    if digits == "1" or "new" in speech or "beginner" in speech or "never played" in speech:
+        seed, label = 800, "welcome to the game"
+    elif digits == "2" or "casual" in speech:
+        seed, label = 1200, "a casual player"
+    elif digits == "3" or "rated" in speech or "experienced" in speech or "tournament" in speech:
+        seed, label = 1600, "a rated player"
+
+    with app.app_context():
+        _touch_call_log(phone_clean)
+        if seed:
+            user = db.session.get(User, phone_clean)
+            if not user:
+                user = User(phone_number=phone_clean)
+                db.session.add(user)
+            total_games = db.session.execute(
+                select(func.count(Game.id)).filter_by(user_phone=phone_clean)
+            ).scalar() or 0
+            if total_games == 0:
+                user.elo = seed
+            db.session.commit()
+            return make_twiml_response(
+                f"<Say>Great, {_xml_escape(label)}.</Say><Redirect>/api/voice?calibrated=1</Redirect>"
+            )
+
+    return make_twiml_response(
+        "<Say>No problem, we'll start balanced.</Say><Redirect>/api/voice?calibrated=skip</Redirect>"
+    )
 
 
 @app.route("/api/voice/process_move", methods=["GET", "POST"])
