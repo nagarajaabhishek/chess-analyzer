@@ -15,6 +15,23 @@ class User(db.Model):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+class CallLog(db.Model):
+    """One row per inbound Twilio call — the raw material for retention metrics
+    (repeat-caller rate, call duration, games per caller)."""
+    __tablename__ = "call_logs"
+    id = db.Column(db.String(36), primary_key=True)
+    call_sid = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    phone_number = db.Column(db.String(30), nullable=True, index=True)
+    started_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    ended_at = db.Column(db.DateTime, nullable=True)      # best-effort bump on every webhook; exact via status callback
+    duration_seconds = db.Column(db.Integer, nullable=True)  # authoritative, from Twilio CallDuration
+    game_id = db.Column(db.String(36), db.ForeignKey("games.id"), nullable=True)
+    hangup_reason = db.Column(db.String(30), nullable=True)  # CallStatus at completion: completed|busy|failed|no-answer|canceled
+    call_type = db.Column(db.String(30), nullable=True)     # type of call e.g. inbound
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 class Game(db.Model):
     __tablename__ = "games"
     id = db.Column(db.String(36), primary_key=True)
@@ -37,6 +54,7 @@ class Game(db.Model):
     draw_offered_by = db.Column(db.String(30), nullable=True)  # phone of whoever last offered a draw (voice_pvp)
     pending_promotion_uci = db.Column(db.String(5), nullable=True)  # e.g., 'e7e8'
     pending_ambiguous_moves = db.Column(db.Text, nullable=True)  # e.g., JSON list of UCI moves
+    pending_confirmation_uci = db.Column(db.String(5), nullable=True) # e.g. 'e2e4' (low confidence fallback)
     player_color = db.Column(db.String(5), nullable=True)  # 'white' or 'black'
     last_activity_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # bumped on every real move
     white_acknowledged = db.Column(db.Boolean, default=False)

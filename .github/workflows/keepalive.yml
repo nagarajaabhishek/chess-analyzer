@@ -31,4 +31,4 @@ jobs:
         run: |
           curl -sS -m 90 --retry 3 --retry-delay 10 -o /dev/null \
             -w "HTTP %{http_code} in %{time_total}s\n" \
-            https://chessnow.onrender.com/api/check
+            https://chessnow.app/api/check

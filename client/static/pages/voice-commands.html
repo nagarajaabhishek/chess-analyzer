@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Command Reference — ChessNow</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+</head>
+<body class="content-page-body">
+
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<header class="header">
+  <nav aria-label="Primary" style="width: 100%;">
+    <div class="header-inner">
+      <a href="/" class="logo" style="text-decoration: none;">
+        <span class="logo-icon">♟</span>
+        <span class="logo-text">ChessLens</span>
+      </a>
+    </div>
+  </nav>
+</header>
+
+<main id="main-content" class="content-container">
+  <h1>Voice Command Reference</h1>
+  <p>ChessNow's voice recognition parser translates your natural spoken words into legal standard chess moves. Below is the complete reference of what you can say during a call.</p>
+
+  <h2>1. Standard Moves & Phonetics</h2>
+  <p>You can state your moves using standard piece names and square coordinates. The parser cleans up punctuation and common verbal fillers automatically.</p>
+  
+  <table class="command-table">
+    <thead>
+      <tr>
+        <th>Command Format</th>
+        <th>Example Phrasing</th>
+        <th>Parsed Move</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Pawn Moves</strong></td>
+        <td><code>"E 4"</code> or <code>"E 2 to E 4"</code> or <code>"play E 4"</code></td>
+        <td>e4 / e2-e4</td>
+      </tr>
+      <tr>
+        <td><strong>Piece Placements</strong></td>
+        <td><code>"Knight to F 3"</code> or <code>"N F 3"</code> or <code>"Knight F 3"</code></td>
+        <td>Nf3</td>
+      </tr>
+      <tr>
+        <td><strong>Captures</strong></td>
+        <td><code>"Knight takes E 5"</code> or <code>"Knight captures E 5"</code></td>
+        <td>Nxe5</td>
+      </tr>
+      <tr>
+        <td><strong>Pawn Captures</strong></td>
+        <td><code>"E takes D 5"</code> or <code>"E pawn takes D 5"</code></td>
+        <td>exd5</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>NATO Phonetic Alphabet Support</h3>
+  <p>If the engine has trouble understanding coordinate letters (especially over noisy 8kHz cell connections), use the NATO phonetic alphabet for files A through H:</p>
+  <ul>
+    <li><strong>A</strong> = Alpha</li>
+    <li><strong>B</strong> = Bravo</li>
+    <li><strong>C</strong> = Charlie</li>
+    <li><strong>D</strong> = Delta</li>
+    <li><strong>E</strong> = Echo</li>
+    <li><strong>F</strong> = Foxtrot</li>
+    <li><strong>G</strong> = Golf</li>
+    <li><strong>H</strong> = Hotel</li>
+  </ul>
+  <p><em>Example:</em> Saying <code>"Echo four"</code> is parsed as <code>e4</code>. Saying <code>"Knight to Charlie three"</code> is parsed as <code>Nc3</code>.</p>
+
+  <h2>2. Castling & Special Moves</h2>
+  <ul>
+    <li><strong>Castling Kingside:</strong> Say <code>"castle kingside"</code>, <code>"castle"</code>, <code>"O-O"</code>, or <code>"short castle"</code>.</li>
+    <li><strong>Castling Queenside:</strong> Say <code>"castle queenside"</code>, <code>"O-O-O"</code>, or <code>"long castle"</code>.</li>
+  </ul>
+
+  <h2>3. Pawn Promotion Flow</h2>
+  <p>When one of your pawns reaches the 8th rank, Thara will pause the game and ask which piece you want: <em>"Your pawn reached the eighth rank. Which piece would you like? Say queen, rook, bishop, or knight."</em></p>
+  <p>To promote, simply say: <code>"queen"</code>, <code>"rook"</code>, <code>"bishop"</code>, or <code>"knight"</code>. Alternatively, you can press phone keys: 1 (Queen), 2 (Rook), 3 (Bishop), or 4 (Knight).</p>
+
+  <h2>4. Ambiguity Resolution & Confirmations</h2>
+  <h3>Ambiguous Moves</h3>
+  <p>If two identical pieces can move to the same destination square (for example, knights on b1 and d2 both able to reach c3), and you say <code>"Knight to C 3"</code>, Thara will ask: <em>"Which knight? The one on B1 or D2?"</em></p>
+  <p>Respond by saying the starting square: <code>"B 1"</code> or <code>"D 2"</code>.</p>
+
+  <h3>Low Confidence Confirmation Flow</h3>
+  <p>If the parser cannot verify a legal SAN/UCI move but detects a piece name and destination (e.g. <code>"Rook E 4"</code>), it triggers a safety prompt: <em>"I heard Rook to E4. Press 1 or say yes to play it, or say no to try again."</em></p>
+  <ul>
+    <li>Say <code>"yes"</code> or <code>"play"</code> (or press 1) to commit the move.</li>
+    <li>Say <code>"no"</code> or <code>"cancel"</code> (or press 2) to reject the move and speak again.</li>
+  </ul>
+
+  <h2>5. Board-State Queries</h2>
+  <p>You can query the game status without consuming a turn. The parser intercepts these commands, dictates the answer, and immediately redirects you to the move input prompt.</p>
+  <ul>
+    <li><strong>Repeat Position:</strong> Say <code>"repeat"</code>, <code>"position"</code>, <code>"read the board"</code>, or <code>"my pieces"</code>.</li>
+    <li><strong>Opponent's Pieces:</strong> Say <code>"opponent's pieces"</code> or <code>"your pieces"</code>.</li>
+    <li><strong>Check Square:</strong> Say <code>"What is on [square]?"</code> or <code>"What's on [square]?"</code> (e.g. <code>"What's on E 4?"</code>).</li>
+    <li><strong>Last Move Played:</strong> Say <code>"last move"</code>, <code>"previous move"</code>, or <code>"what did you play?"</code>.</li>
+    <li><strong>Game Status:</strong> Say <code>"whose turn"</code>, <code>"status"</code>, <code>"score"</code>, or <code>"material"</code> to hear move counts and material balance.</li>
+  </ul>
+
+  <h2>6. Telephone Keypad (DTMF) Shortcuts</h2>
+  <p>You can press keypad numbers on your phone instead of speaking to perform system commands:</p>
+  <ul>
+    <li><strong>Press 1:</strong> Resign the game.</li>
+    <li><strong>Press 2:</strong> Offer a draw.</li>
+    <li><strong>Press 3:</strong> Takeback (undo the last move and the bot's response).</li>
+  </ul>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="footer-inner">
+    <p class="footer-copy">&copy; 2026 ChessNow. All rights reserved.</p>
+    <div class="footer-links">
+      <a href="/" class="footer-link">Home</a>
+      <a href="/faq" class="footer-link">FAQ</a>
+      <a href="/accessibility" class="footer-link">Accessibility</a>
+      <a href="/guides/blindfold-chess" class="footer-link">Blindfold Guide</a>
+      <a href="/guides/voice-commands" class="footer-link">Voice Reference</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

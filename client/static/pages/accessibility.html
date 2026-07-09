@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Accessibility Support — ChessNow</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+</head>
+<body class="content-page-body">
+
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<header class="header">
+  <nav aria-label="Primary" style="width: 100%;">
+    <div class="header-inner">
+      <a href="/" class="logo" style="text-decoration: none;">
+        <span class="logo-icon">♟</span>
+        <span class="logo-text">ChessLens</span>
+      </a>
+    </div>
+  </nav>
+</header>
+
+<main id="main-content" class="content-container">
+  <h1>Accessibility Support</h1>
+  
+  <blockquote>
+    "Our mission is to make chess universally accessible. By utilizing telephone networks and natural speech interfaces, we provide a screen-free, keyboard-free, and barrier-free way to play chess."
+  </blockquote>
+
+  <h2>Why Phone-First Beats Screen-Readers-on-Grids</h2>
+  <p>Traditional digital chess interfaces rely on complex two-dimensional grids that are notoriously difficult to navigate using standard screen readers. Finding squares, understanding coordinate paths, tracking piece coordinates, and maintaining spatial awareness on a grid requires screen-reader users to execute dozens of keystrokes per turn.</p>
+  <p>ChessNow bypasses the screen entirely. By shifting the game to a voice-controlled telephone hotline, players can converse with our chess engine, Thara, as if playing against a sighted companion at a physical table. Spoken coordinates and pieces are parsed directly, and the game state is dictated back in clear, natural speech.</p>
+
+  <h2>Voice Command Reference</h2>
+  <p>You can say any of the following commands when playing a game over the phone hotline:</p>
+  
+  <table class="command-table">
+    <thead>
+      <tr>
+        <th>Command Type</th>
+        <th>What to Say (Examples)</th>
+        <th>Hotline Response / Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Standard Moves</strong></td>
+        <td><code>"E 4"</code>, <code>"Knight to F 3"</code>, <code>"D 2 to D 4"</code>, <code>"Bishop takes C 4"</code></td>
+        <td>Validates and plays the move. If it is ambiguous, asks which piece you meant.</td>
+      </tr>
+      <tr>
+        <td><strong>Castling</strong></td>
+        <td><code>"Castle kingside"</code>, <code>"Castle queenside"</code>, <code>"Short castle"</code></td>
+        <td>Executes kingside or queenside castling if legally permitted.</td>
+      </tr>
+      <tr>
+        <td><strong>Pawn Promotion</strong></td>
+        <td><code>"Queen"</code>, <code>"Rook"</code>, <code>"Bishop"</code>, <code>"Knight"</code></td>
+        <td>Spoken during the promotion prompt to choose your promoted piece.</td>
+      </tr>
+      <tr>
+        <td><strong>Board Queries</strong></td>
+        <td><code>"Repeat position"</code>, <code>"Read the board"</code>, <code>"My pieces"</code></td>
+        <td>Lists all of your active pieces on the board ordered by value (K, Q, R, B, N, pawns).</td>
+      </tr>
+      <tr>
+        <td><strong>Opponent Pieces</strong></td>
+        <td><code>"Opponent's pieces"</code>, <code>"Your pieces"</code></td>
+        <td>Lists all of the bot's (or opponent's) active pieces on the board.</td>
+      </tr>
+      <tr>
+        <td><strong>Square Check</strong></td>
+        <td><code>"What's on E 4?"</code>, <code>"What is on F 3?"</code></td>
+        <td>Responds with the piece type and color on that square, or "empty".</td>
+      </tr>
+      <tr>
+        <td><strong>Last Move</strong></td>
+        <td><code>"Last move"</code>, <code>"Previous move"</code>, <code>"What did you play?"</code></td>
+        <td>Repeats the last move played on the board (e.g. "White played Knight to F3").</td>
+      </tr>
+      <tr>
+        <td><strong>Game Status</strong></td>
+        <td><code>"Whose turn"</code>, <code>"Status"</code>, <code>"Score"</code>, <code>"Material"</code></td>
+        <td>Responds with whose turn it is, current move number, and material differences.</td>
+      </tr>
+      <tr>
+        <td><strong>Control Commands</strong></td>
+        <td><code>"Resign"</code>, <code>"Draw"</code>, <code>"Takeback"</code>, <code>"Undo"</code></td>
+        <td>Resigns, offers a draw, or takes back the last two half-moves (bot games only).</td>
+      </tr>
+      <tr>
+        <td><strong>Help Menu</strong></td>
+        <td><code>"Help"</code>, <code>"Commands"</code>, <code>"What can I say?"</code></td>
+        <td>Plays a short spoken summary of valid commands.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>DTMF Keypad Fallbacks</h2>
+  <p>If you are playing in a noisy environment or prefer using your phone's physical keypad, you can press the following keys at any point during a game:</p>
+  <ul>
+    <li><strong>Press 1</strong> to Resign the game.</li>
+    <li><strong>Press 2</strong> to Offer a Draw.</li>
+    <li><strong>Press 3</strong> to Request a Takeback (undo).</li>
+  </ul>
+
+  <h2>Tips for Screen Reader Users on the Companion Website</h2>
+  <p>If you use a screen reader (such as JAWS, NVDA, VoiceOver, or TalkBack) to browse our companion web dashboard, please keep the following tips in mind:</p>
+  <ul>
+    <li><strong>Keyboard Navigation:</strong> Press <code>Tab</code> immediately after the page loads to access the "Skip to main content" link, which bypasses the header navigation and lands you directly on the play/analysis forms.</li>
+    <li><strong>Live Announcements:</strong> We use <code>aria-live="polite"</code> containers for the WebRTC browser phone. When calling Thara, status transitions (e.g., "Dialing...", "Connected", "Opponent moved") and transcribed speech results are automatically spoken by your screen reader.</li>
+    <li><strong>Focus Indicators:</strong> Custom high-contrast gold outlines are visible on focusable elements to assist users with low vision.</li>
+  </ul>
+
+  <h2>Community & Feedback</h2>
+  <p>ChessNow is built with and for the blind chess community. We are committed to achieving full compliance with the Web Content Accessibility Guidelines (WCAG) 2.1 Level AA standards.</p>
+  <p>If you have feature suggestions, bug reports, or feedback regarding hotline accessibility, please get in touch with our team at <a href="mailto:accessibility@chessnow.app">accessibility@chessnow.app</a>.</p>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="footer-inner">
+    <p class="footer-copy">&copy; 2026 ChessNow. All rights reserved.</p>
+    <div class="footer-links">
+      <a href="/" class="footer-link">Home</a>
+      <a href="/faq" class="footer-link">FAQ</a>
+      <a href="/accessibility" class="footer-link">Accessibility</a>
+      <a href="/guides/blindfold-chess" class="footer-link">Blindfold Guide</a>
+      <a href="/guides/voice-commands" class="footer-link">Voice Reference</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
