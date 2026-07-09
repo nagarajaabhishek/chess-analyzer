@@ -3285,6 +3285,10 @@ function connectVoiceCall(botName, personality) {
   formData.append("From", currentCallPhone);
   formData.append("force_new", "1");
   formData.append("personality", personality);
+  const difficultySelect = $("difficulty-select");
+  if (difficultySelect && difficultySelect.value) {
+    formData.append("elo", difficultySelect.value);
+  }
 
   fetch("/api/voice", {
     method: "POST",
