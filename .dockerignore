@@ -1,0 +1,8 @@
+.env
+instance/
+analysis_cache.json
+ios/
+node_modules/
+.git/
+__pycache__/
+*.pyc
