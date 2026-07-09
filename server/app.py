@@ -38,7 +38,7 @@ sock = Sock(app)
 tasks = {}  # In-memory task store
 
 # ── Database Configuration ──
-from models import db, User, Game, CallLog
+from models import db, User, Game, CallLog, EventLog
 
 raw_db_url = os.environ.get("DATABASE_URL", "").strip()
 if raw_db_url:
@@ -92,9 +92,18 @@ with app.app_context():
 
     if "call_logs" in _inspector.get_table_names():
         _existing_cols = {c["name"] for c in _inspector.get_columns("call_logs")}
-        if "call_type" not in _existing_cols:
-            db.session.execute(db.text("ALTER TABLE call_logs ADD COLUMN call_type VARCHAR(30)"))
-            db.session.commit()
+        _calllog_migrations = {
+            "call_type":       "ALTER TABLE call_logs ADD COLUMN call_type VARCHAR(30)",
+            "first_call":      "ALTER TABLE call_logs ADD COLUMN first_call BOOLEAN DEFAULT FALSE",
+            "moves_played":    "ALTER TABLE call_logs ADD COLUMN moves_played INTEGER DEFAULT 0",
+            "speech_retries":  "ALTER TABLE call_logs ADD COLUMN speech_retries INTEGER DEFAULT 0",
+            "confirm_prompts": "ALTER TABLE call_logs ADD COLUMN confirm_prompts INTEGER DEFAULT 0",
+            "first_move_at":   "ALTER TABLE call_logs ADD COLUMN first_move_at TIMESTAMP",
+        }
+        for _col, _stmt in _calllog_migrations.items():
+            if _col not in _existing_cols:
+                db.session.execute(db.text(_stmt))
+        db.session.commit()
 
 @app.before_request
 def handle_options_preflight():
@@ -145,6 +154,8 @@ GEMINI_API_KEY      = os.environ.get("GEMINI_API_KEY", "")
 
 # Public base URL for game review links (override via BASE_URL env var)
 BASE_URL = os.environ.get("BASE_URL", "https://chessnow.app")
+# Inbound local-number voice rate used for cost-per-game estimates (USD/min).
+TWILIO_VOICE_COST_PER_MIN = float(os.environ.get("TWILIO_VOICE_COST_PER_MIN", "0.0085"))
 
 if not TWILIO_AUTH_TOKEN:
     print("⚠️  TWILIO_AUTH_TOKEN not set — incoming Twilio webhook requests will NOT be "
@@ -1791,12 +1802,40 @@ def _touch_call_log(phone_clean, game_id=None):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     log = db.session.execute(select(CallLog).filter_by(call_sid=call_sid)).scalars().first()
     if not log:
-        log = CallLog(id=str(uuid.uuid4()), call_sid=call_sid, phone_number=phone_clean, started_at=now, call_type="inbound")
+        prior_calls = db.session.execute(
+            select(func.count(CallLog.id)).filter_by(phone_number=phone_clean)
+        ).scalar() or 0
+        log = CallLog(id=str(uuid.uuid4()), call_sid=call_sid, phone_number=phone_clean,
+                      started_at=now, call_type="inbound", first_call=(prior_calls == 0))
         db.session.add(log)
     log.ended_at = now
     if game_id and not log.game_id:
         log.game_id = game_id
     db.session.commit()
+
+
+def _bump_call_stats(moves=0, retries=0, confirms=0):
+    """Increment ASR/activation counters on the current call's CallLog.
+    Safe no-op for requests without a CallSid (web UI / tests)."""
+    call_sid = request.values.get("CallSid", "")
+    if not call_sid:
+        return
+    try:
+        log = db.session.execute(select(CallLog).filter_by(call_sid=call_sid)).scalars().first()
+        if not log:
+            return
+        if moves:
+            log.moves_played = (log.moves_played or 0) + moves
+            if not log.first_move_at:
+                log.first_move_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        if retries:
+            log.speech_retries = (log.speech_retries or 0) + retries
+        if confirms:
+            log.confirm_prompts = (log.confirm_prompts or 0) + confirms
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️  call-stats bump failed: {e}")
 
 
 @app.route("/api/voice/call_status", methods=["POST"])
@@ -1824,6 +1863,23 @@ def voice_call_status():
             log.duration_seconds = int(duration)
         db.session.commit()
     return ("", 204)
+
+
+@app.route("/api/metrics/event", methods=["POST"])
+def log_client_event():
+    """Anonymous client-side event beacon (web dial-button clicks etc.).
+    Whitelisted event names only; no auth by design — treat counts as soft signals."""
+    try:
+        data = request.get_json(silent=True) or {}
+        event = str(data.get("event", ""))[:40]
+        if event not in ("dial_click",):
+            return jsonify({"error": "unknown event"}), 400
+        db.session.add(EventLog(id=str(uuid.uuid4()), event=event))
+        db.session.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/admin/metrics", methods=["GET"])
@@ -1933,6 +1989,50 @@ def admin_metrics():
                 select(func.count(Game.id)).filter(Game.result != '*', Game.result != None, *game_filter)
             ).scalar() or 0
 
+            # 8. Activation: do first-time callers get to a move, and finish a game?
+            first_call_rows = db.session.execute(
+                select(CallLog.game_id, CallLog.started_at, CallLog.first_move_at)
+                .filter(CallLog.first_call == True, *log_filter)
+            ).all()
+            first_calls = len(first_call_rows)
+            fc_game_ids = [r[0] for r in first_call_rows if r[0]]
+            fc_completed = 0
+            if fc_game_ids:
+                fc_completed = db.session.execute(
+                    select(func.count(Game.id)).filter(
+                        Game.id.in_(fc_game_ids), Game.result != '*', Game.result != 'aborted')
+                ).scalar() or 0
+            first_call_completed_game_rate = round(fc_completed / first_calls, 3) if first_calls else None
+
+            ttfm = sorted(
+                int((r[2] - r[1]).total_seconds())
+                for r in first_call_rows if r[1] and r[2]
+            )
+            median_seconds_to_first_move = _percentile(ttfm, 50)
+
+            # 9. ASR health: retries and confirmation loops per successful move
+            total_moves, total_retries, total_confirms = db.session.execute(
+                select(func.coalesce(func.sum(CallLog.moves_played), 0),
+                       func.coalesce(func.sum(CallLog.speech_retries), 0),
+                       func.coalesce(func.sum(CallLog.confirm_prompts), 0))
+                .filter(*log_filter)
+            ).one()
+            retries_per_move = round(total_retries / total_moves, 3) if total_moves else None
+            confirm_loop_rate = round(total_confirms / total_moves, 3) if total_moves else None
+
+            # 10. Web dial clicks (acquisition beacon)
+            event_filter = []
+            if start_time:
+                event_filter.append(EventLog.created_at >= start_time)
+            dial_clicks = db.session.execute(
+                select(func.count(EventLog.id)).filter(EventLog.event == "dial_click", *event_filter)
+            ).scalar() or 0
+
+            # 11. Telephony cost per completed voice game (estimate from call durations)
+            total_minutes = (sum(durations) / 60.0) if durations else 0.0
+            est_cost = total_minutes * TWILIO_VOICE_COST_PER_MIN
+            cost_per_completed_game = round(est_cost / finished_games_count, 4) if finished_games_count else None
+
             return {
                 "total_calls": total_calls,
                 "unique_callers": unique_callers,
@@ -1944,6 +2044,15 @@ def admin_metrics():
                 "voice_games_finished": finished_games_count,
                 "games_per_caller": games_per_caller,
                 "hangup_reasons": hangup_reasons,
+                "first_calls": first_calls,
+                "first_call_completed_game_rate": first_call_completed_game_rate,
+                "median_seconds_to_first_move": median_seconds_to_first_move,
+                "moves_played": int(total_moves),
+                "speech_retries_per_move": retries_per_move,
+                "confirm_loop_rate": confirm_loop_rate,
+                "web_dial_clicks": dial_clicks,
+                "est_voice_cost_usd": round(est_cost, 2),
+                "cost_per_completed_game_usd": cost_per_completed_game,
             }
 
         all_time_metrics = _get_metrics_for_period(None)
@@ -2262,6 +2371,7 @@ def process_voice_move():
     else:
         speech = request.values.get("SpeechResult", "").strip()
         if not speech:
+            _bump_call_stats(retries=1)
             return make_twiml_response("<Say>I didn't hear anything. Let's try again.</Say><Redirect>/api/voice</Redirect>")
 
         raw_clean = speech.lower().replace(".", "").replace(",", "").replace("-", "").replace(" ", "")
@@ -2388,9 +2498,10 @@ def process_voice_move():
                     played_san = board.san(matched_uci_move)
                     board.push(matched_uci_move)
                     _save_pgn(game, board)
-                    
+
                     game.pending_ambiguous_moves = None
                     db.session.commit()
+                    _bump_call_stats(moves=1)
                     
                     if board.is_game_over():
                         res = board.result()
@@ -2581,6 +2692,7 @@ def process_voice_move():
                     san = board.san(candidate_move)
                     game.pending_confirmation_uci = candidate_move.uci()
                     db.session.commit()
+                    _bump_call_stats(confirms=1)
                     
                     twiml = f"""
                     <Say>I heard {_xml_escape(_san_to_speech(san))}. Press 1 or say yes to play it, or say no to try again.</Say>
@@ -2595,6 +2707,7 @@ def process_voice_move():
             played_san = board.san(matched_move)
             board.push(matched_move)
             _save_pgn(game, board)
+            _bump_call_stats(moves=1)
             if game.draw_offered_by:
                 game.draw_offered_by = None
                 db.session.commit()
@@ -2616,6 +2729,7 @@ def process_voice_move():
             
             return make_twiml_response(f"<Redirect>/api/voice?msg={urllib.parse.quote(say_msg)}</Redirect>")
         else:
+            _bump_call_stats(retries=1)
             say_msg = f"Sorry, {speech} is not a legal move. Let's try again."
 
         twiml = f"""
@@ -2669,6 +2783,7 @@ def process_voice_promotion():
             played_san = board.san(move)
             board.push(move)
             _save_pgn(game, board)
+            _bump_call_stats(moves=1)
             pending_uci = game.pending_promotion_uci
             game.pending_promotion_uci = None
             db.session.commit()
@@ -2723,6 +2838,7 @@ def voice_confirm_move():
                 played_san = board.san(move)
                 board.push(move)
                 _save_pgn(game, board)
+                _bump_call_stats(moves=1)
 
                 if board.is_game_over():
                     res = board.result()
@@ -2744,6 +2860,8 @@ def voice_confirm_move():
             else:
                 return make_twiml_response("<Say>That move is no longer legal. Let's try again.</Say><Redirect>/api/voice</Redirect>")
         else:
+            # Caller rejected the low-confidence guess — the original parse was wrong.
+            _bump_call_stats(retries=1)
             return make_twiml_response("<Say>Okay, let's try again.</Say><Redirect>/api/voice</Redirect>")
 
 

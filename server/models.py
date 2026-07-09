@@ -29,6 +29,25 @@ class CallLog(db.Model):
     hangup_reason = db.Column(db.String(30), nullable=True)  # CallStatus at completion: completed|busy|failed|no-answer|canceled
     call_type = db.Column(db.String(30), nullable=True)     # type of call e.g. inbound
 
+    # Activation & ASR-health instrumentation (product-expansion-v2 item 3)
+    first_call = db.Column(db.Boolean, default=False)       # this phone's first-ever call
+    moves_played = db.Column(db.Integer, default=0)         # successful moves in this call
+    speech_retries = db.Column(db.Integer, default=0)       # empty/unparseable/illegal inputs
+    confirm_prompts = db.Column(db.Integer, default=0)      # low-confidence confirmation loops triggered
+    first_move_at = db.Column(db.DateTime, nullable=True)   # when the first successful move landed
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+class EventLog(db.Model):
+    """Lightweight client-side event beacon (e.g. web dial-button clicks) so the
+    web→phone acquisition step is measurable."""
+    __tablename__ = "event_logs"
+    id = db.Column(db.String(36), primary_key=True)
+    event = db.Column(db.String(40), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
