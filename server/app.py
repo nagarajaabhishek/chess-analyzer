@@ -489,17 +489,34 @@ def get_config():
     })
 
 
+LIVE_FEED_LIMIT = 12
+
+
+def _public_player_name(name):
+    """Anonymize human players in the public feed. Bot names ("Thara (1240)")
+    stay; anything else — "You", "Player 1234" (trailing phone digits) — must
+    never leak to unauthenticated viewers."""
+    if name and name.startswith("Thara"):
+        return name
+    return "Anonymous"
+
+
 @app.route("/api/games/live")
 def get_live_games():
     try:
-        stmt = db.select(Game).where(Game.result == '*').order_by(Game.created_at.desc())
+        stmt = (
+            db.select(Game)
+            .where(Game.result == '*')
+            .order_by(Game.last_activity_at.desc())
+            .limit(LIVE_FEED_LIMIT)
+        )
         games = db.session.execute(stmt).scalars().all()
         live_games = []
         for g in games:
             live_games.append({
                 "id": g.id,
-                "white_player": g.white_player,
-                "black_player": g.black_player,
+                "white_player": _public_player_name(g.white_player),
+                "black_player": _public_player_name(g.black_player),
                 "source": g.source,
                 "created_at": g.created_at.isoformat() if g.created_at else None,
                 "last_activity_at": g.last_activity_at.isoformat() if g.last_activity_at else None,
