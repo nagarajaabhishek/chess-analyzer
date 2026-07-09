@@ -1980,6 +1980,15 @@ function initLandingPageListeners() {
   const dialPhoneBtn = $("btn-dial-phone");
   if (dialPhoneBtn) {
     dialPhoneBtn.addEventListener("click", () => {
+      // Acquisition beacon: count web→phone dial intent (anonymous, best-effort)
+      try {
+        const payload = JSON.stringify({ event: "dial_click" });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon("/api/metrics/event", new Blob([payload], { type: "application/json" }));
+        } else {
+          fetch("/api/metrics/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+        }
+      } catch (_) { /* never block the dial action */ }
       const displayEl = $("phone-number-display");
       if (displayEl) {
         const phoneNumber = displayEl.textContent.trim();
