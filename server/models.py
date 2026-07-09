@@ -79,6 +79,7 @@ class Game(db.Model):
     last_activity_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))  # bumped on every real move
     white_acknowledged = db.Column(db.Boolean, default=False)
     black_acknowledged = db.Column(db.Boolean, default=False)
+    hints_used = db.Column(db.Integer, default=0)  # engine hints spoken this game (cap 3, bot games)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
