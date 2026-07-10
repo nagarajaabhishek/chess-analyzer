@@ -562,6 +562,10 @@ function renderAnalysis(result) {
   renderClsBreakdown("cls-white", result.white_counts);
   renderClsBreakdown("cls-black", result.black_counts);
 
+  // Review is done — offer the shareable card (item 15)
+  const shareBtn = $("btn-share-card");
+  if (shareBtn && (result.white_counts || result.black_counts)) shareBtn.classList.remove("hidden");
+
   // Populate mobile game review metadata
   if ($("mob-info-opening")) $("mob-info-opening").textContent = result.opening || g.opening || "Unknown Opening";
   if ($("mob-info-result")) $("mob-info-result").textContent = g.result || "Draw";
@@ -2374,6 +2378,10 @@ initPhoneAuth();
 initVoiceCall();
 initLandingPageListeners();
 initGameSourceToggle();
+{
+  const shareBtn = $("btn-share-card");
+  if (shareBtn) shareBtn.addEventListener("click", generateShareCard);
+}
 
 // Initialize dynamic SPA hash routing
 window.addEventListener("hashchange", handleHashRouting);
@@ -3071,6 +3079,77 @@ function updateSummaryPills(counts) {
       container.appendChild(pill);
     }
   });
+}
+
+// Renders a branded 1200x630 review card to the hidden canvas, then shares it
+// (Web Share API) or downloads it — turning analysis into distribution (item 15).
+function generateShareCard() {
+  const r = state.result;
+  if (!r) return;
+  const canvas = $("share-canvas");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+
+  const GOLD = "#d4a055", RUST = "#b55c1a", INK = "#161311", CARD = "#211b16", TXT2 = "#c4a070", TXT3 = "#8a7355";
+  // Background
+  ctx.fillStyle = INK; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = CARD; roundRect(ctx, 40, 40, W - 80, H - 80, 28); ctx.fill();
+  ctx.strokeStyle = "rgba(212,160,85,0.25)"; ctx.lineWidth = 2;
+  roundRect(ctx, 40, 40, W - 80, H - 80, 28); ctx.stroke();
+
+  // Brand
+  ctx.fillStyle = GOLD; ctx.font = "600 40px Inter, sans-serif"; ctx.textBaseline = "top";
+  ctx.fillText("♟ ChessNow", 90, 84);
+  ctx.fillStyle = TXT3; ctx.font = "400 24px Inter, sans-serif";
+  ctx.fillText("Local game review · Stockfish 18", 92, 138);
+
+  const opening = (r.opening || "Chess Game").slice(0, 46);
+  ctx.fillStyle = "#ffffff"; ctx.font = "700 46px Inter, sans-serif";
+  ctx.fillText(opening, 90, 196);
+
+  // Two accuracy columns
+  const drawPlayer = (x, name, acc, counts) => {
+    ctx.fillStyle = TXT2; ctx.font = "500 28px Inter, sans-serif";
+    ctx.fillText((name || "Player").slice(0, 20), x, 300);
+    ctx.fillStyle = GOLD; ctx.font = "700 92px Inter, sans-serif";
+    ctx.fillText(acc + "%", x, 336);
+    ctx.fillStyle = TXT3; ctx.font = "400 22px Inter, sans-serif";
+    ctx.fillText("accuracy", x + 4, 440);
+    const best = (counts && counts.best) || 0, blunders = (counts && counts.blunder) || 0;
+    ctx.fillStyle = TXT2; ctx.font = "500 24px Inter, sans-serif";
+    ctx.fillText(`★ ${best} best   ✕ ${blunders} blunders`, x, 484);
+  };
+  drawPlayer(90, r.white_player, r.white_accuracy, r.white_counts);
+  drawPlayer(640, r.black_player, r.black_accuracy, r.black_counts);
+
+  // Divider + footer
+  ctx.strokeStyle = "rgba(212,160,85,0.15)"; ctx.beginPath(); ctx.moveTo(600, 300); ctx.lineTo(600, 508); ctx.stroke();
+  ctx.fillStyle = RUST; ctx.font = "600 26px Inter, sans-serif";
+  ctx.fillText("Analyze your games free — no account, no cloud — at chessnow.app", 90, 548);
+
+  const done = (blobUrlOrShared) => {};
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    const file = new File([blob], "chessnow-review.png", { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: "My ChessNow review", text: "My game review on ChessNow" }); return; }
+      catch (_) { /* fall through to download */ }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "chessnow-review.png"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 function updateCoachBubbleWithLiveEval(lines) {

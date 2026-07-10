@@ -3793,3 +3793,24 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
   min-height: 96px;
 }
 .pgn-input:focus-visible { outline: none; border-color: var(--accent); }
+
+/* ── Shareable review card button (expansion-v2 item 15) ── */
+.btn-share-card {
+  margin-top: 10px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.btn-share-card:hover, .btn-share-card:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(212, 160, 85, 0.06);
+}
+.btn-share-card.hidden { display: none; }
