@@ -2037,8 +2037,165 @@ function initSampleCall() {
   window.addEventListener("pagehide", stop);
 }
 
+function initSpeakDemo() {
+  // "Speak your first move" — the product demoing its own medium in the browser.
+  // Uses the already-loaded chess.js (validation) + chessboard-js (render) +
+  // Web Speech API. Rehearses the exact skill a first phone call needs.
+  const wrap = $("speak-demo");
+  const revealBtn = $("btn-speak-demo");
+  const stage = $("speak-stage");
+  const micBtn = $("btn-speak-mic");
+  const chips = $("speak-chips");
+  const statusEl = $("speak-status");
+  const cta = $("speak-cta");
+  if (!wrap || !revealBtn || typeof Chess === "undefined" || typeof Chessboard === "undefined") return;
+
+  wrap.classList.remove("hidden");
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Thara's canned replies to common first moves (san → [reply, comment]).
+  const BOOK = {
+    "e4":  ["c5", "e4 — I'll answer with the Sicilian."],
+    "d4":  ["d5", "d4. Classical — I'll hold the center."],
+    "Nf3": ["d5", "Knight f3, flexible. I'll play d5."],
+    "c4":  ["e5", "The English! Bold. I'll strike with e5."],
+    "g3":  ["d5", "Hypermodern. I'll grab the center with d5."],
+    "e3":  ["d5", "A quiet start. I'll take d5."],
+    "b3":  ["e5", "Fianchetto plans. I'll play e5."],
+    "Nc3": ["d5", "Knight c3. I'll meet it with d5."],
+  };
+
+  let game = null, board = null, userMoves = 0, busy = false;
+
+  function setStatus(text, thinking) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle("thinking", !!thinking);
+  }
+
+  function ensureBoard() {
+    if (board) return;
+    game = new Chess();
+    // Built synchronously: the stage collapses via max-height (not display:none),
+    // so #speak-board always has its real 260px width for chessboard-js to measure.
+    board = Chessboard("speak-board", {
+      position: "start",
+      pieceTheme: p => "/pieces/" + p + ".svg",
+      draggable: false,
+    });
+  }
+
+  // Speech/text → a legal move on the current position (lightweight port of the
+  // server's normalizer; first moves are easy so this is plenty).
+  function matchMove(raw) {
+    let s = (raw || "").toLowerCase().replace(/[.,\-]/g, "").trim();
+    if (/\b(castle|castles|kingside)\b/.test(s)) s = "oo";
+    s = s.replace(/\balpha\b/g, "a").replace(/\bbravo\b/g, "b").replace(/\bcharlie\b/g, "c")
+         .replace(/\bdelta\b/g, "d").replace(/\becho\b/g, "e").replace(/\bfoxtrot\b/g, "f")
+         .replace(/\bgolf\b/g, "g").replace(/\bhotel\b/g, "h");
+    s = s.replace(/\bknight\b/g, "n").replace(/\bnight\b/g, "n").replace(/\bbishop\b/g, "b")
+         .replace(/\brook\b/g, "r").replace(/\bqueen\b/g, "q").replace(/\bking\b/g, "k");
+    s = s.replace(/\bpawn\b/g, "").replace(/\bto\b/g, "").replace(/\bmove\b/g, "")
+         .replace(/\btakes\b/g, "x").replace(/\bcaptures\b/g, "x").replace(/\s+/g, "");
+    const legal = game.moves({ verbose: true });
+    for (const m of legal) {
+      const sanClean = m.san.toLowerCase().replace(/[x+#=]/g, "");
+      if (s === sanClean || s === (m.from + m.to) || s === m.to || (s === "oo" && /O-O(?!-)/.test(m.san))) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  function tharaReply() {
+    const history = game.history();
+    const last = history[history.length - 1];
+    let replySan = null, comment = "";
+    if (BOOK[last]) {
+      const [bookMove, bookComment] = BOOK[last];
+      comment = bookComment;
+      if (game.moves().includes(bookMove)) replySan = bookMove;
+    }
+    if (!replySan) {
+      const moves = game.moves();
+      const develop = moves.find(m => /^N/.test(m)) || moves.find(m => /^[a-h][45]$/.test(m));
+      replySan = develop || moves[0];
+      if (!comment) comment = `Good move. I'll play ${replySan}.`;
+    }
+    game.move(replySan);
+    board.position(game.fen());
+    return comment;
+  }
+
+  function playUserMove(move) {
+    if (busy || !move) return;
+    busy = true;
+    game.move(move.san);
+    board.position(game.fen());
+    userMoves++;
+    setStatus(`You played ${move.san}. Thara is thinking…`, true);
+    setTimeout(() => {
+      const comment = tharaReply();
+      setStatus(comment, false);
+      // Fire-and-forget audio; never gate UI state on the TTS callback, which
+      // doesn't fire on some mobile browsers (no audio) and would soft-lock.
+      speakVoice(comment);
+      if (userMoves >= 2) {
+        setTimeout(() => {
+          setStatus("That's all it takes — your voice is the whole interface.", false);
+          cta.classList.remove("hidden");
+          micBtn.disabled = true;
+        }, 1600);
+      }
+      busy = false;
+    }, 550);
+  }
+
+  function handleSpoken(text) {
+    const move = matchMove(text);
+    if (move) { playUserMove(move); }
+    else { setStatus(`I heard “${text}” — try a move like “e4” or “knight f3”, or tap one below.`, false); revealChips(); }
+  }
+
+  function revealChips() { chips.classList.remove("hidden"); }
+
+  function startListening() {
+    if (busy) return;
+    if (!SR) { revealChips(); setStatus("Speech isn't supported here — tap a move below.", false); return; }
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 3;
+    micBtn.classList.add("listening");
+    setStatus("Listening… say a move.", true);
+    rec.onresult = (e) => {
+      const heard = Array.from(e.results[0]).map(r => r.transcript).join(" ");
+      micBtn.classList.remove("listening");
+      handleSpoken(heard);
+    };
+    rec.onerror = () => { micBtn.classList.remove("listening"); revealChips(); setStatus("Didn't catch that — tap a move below.", false); };
+    rec.onend = () => micBtn.classList.remove("listening");
+    try { rec.start(); } catch (_) { revealChips(); }
+  }
+
+  revealBtn.addEventListener("click", () => {
+    const opening = stage.classList.contains("hidden");
+    stage.classList.toggle("hidden");
+    revealBtn.setAttribute("aria-expanded", String(opening));
+    if (opening) {
+      ensureBoard();
+      if (!SR) revealChips();
+    }
+  });
+  micBtn.addEventListener("click", startListening);
+  chips.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => { ensureBoard(); handleSpoken(chip.dataset.move); });
+  });
+  window.addEventListener("pagehide", () => { if (window.speechSynthesis) window.speechSynthesis.cancel(); });
+}
+
 function initLandingPageListeners() {
   initSampleCall();
+  initSpeakDemo();
   const dialPhoneBtn = $("btn-dial-phone");
   if (dialPhoneBtn) {
     dialPhoneBtn.addEventListener("click", () => {

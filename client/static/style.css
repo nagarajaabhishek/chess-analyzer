@@ -3676,3 +3676,87 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
   color: var(--accent);
   margin-bottom: 2px;
 }
+
+/* ── Interactive "speak your first move" demo (expansion-v2 item 11) ── */
+.speak-demo { margin-top: 10px; width: 100%; max-width: 460px; }
+.speak-demo.hidden { display: none; }
+.speak-stage {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-height: 900px;
+  overflow: hidden;
+  transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.25s ease;
+}
+/* Collapse via max-height (not display:none) so #speak-board keeps its layout
+   width — chessboard-js measures the container width at build time. */
+.speak-stage.hidden {
+  max-height: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  border-color: transparent;
+  pointer-events: none;
+}
+.speak-board { width: 260px; max-width: 72vw; }
+.speak-status {
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+  min-height: 34px;
+  margin: 0;
+  line-height: 1.45;
+}
+.speak-status.thinking { color: var(--accent); }
+.speak-controls { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.btn-mic {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #1a1207;
+  font-weight: 600;
+  font-size: 14px;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 22px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.btn-mic:hover, .btn-mic:focus-visible { transform: translateY(-1px); box-shadow: 0 6px 18px var(--accent-glow); }
+.btn-mic.listening { animation: mic-pulse 1.1s ease-in-out infinite; }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 10px rgba(212, 160, 85, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .btn-mic.listening { animation: none; } }
+.speak-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.speak-chips.hidden { display: none; }
+.speak-chips .chip {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.speak-chips .chip:hover, .speak-chips .chip:focus-visible { border-color: var(--accent); color: var(--accent); }
+.speak-cta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+.speak-cta:hover, .speak-cta:focus-visible { background: var(--accent-glow); }
+.speak-cta.hidden { display: none; }

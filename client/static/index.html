@@ -305,6 +305,25 @@
           <li data-who="thara"><span class="who">Thara</span>Your pawn is on e4. You can ask me about the board any time — no screen needed.</li>
         </ol>
       </div>
+
+      <!-- Try it yourself: speak a move, watch it play (expansion-v2 item 11) -->
+      <div class="speak-demo hidden" id="speak-demo">
+        <button id="btn-speak-demo" class="btn-sample" type="button" aria-expanded="false" aria-controls="speak-stage">🎤&nbsp; Try it — speak your first move</button>
+        <div class="speak-stage hidden" id="speak-stage">
+          <div id="speak-board" class="speak-board"></div>
+          <p class="speak-status" id="speak-status" aria-live="polite">Tap the mic and say a move — like “e4” or “knight f3”.</p>
+          <div class="speak-controls">
+            <button id="btn-speak-mic" class="btn-mic" type="button">🎤 Speak a move</button>
+            <div class="speak-chips hidden" id="speak-chips" role="group" aria-label="Or tap a move">
+              <button class="chip" type="button" data-move="e4">e4</button>
+              <button class="chip" type="button" data-move="d4">d4</button>
+              <button class="chip" type="button" data-move="Nf3">Nf3</button>
+              <button class="chip" type="button" data-move="c4">c4</button>
+            </div>
+          </div>
+          <a href="tel:+14243776693" class="speak-cta hidden" id="speak-cta">📞 Loved it? Call +1-(4-CHESSNOW-3) and play for real</a>
+        </div>
+      </div>
     </div>
   </section>
 
