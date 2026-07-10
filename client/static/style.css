@@ -3750,3 +3750,46 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
 }
 .speak-cta:hover, .speak-cta:focus-visible { background: var(--accent-glow); }
 .speak-cta.hidden { display: none; }
+
+/* ── Game-source toggle + PGN paste (expansion-v2 item 14) ── */
+.source-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.source-tab {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.source-tab:hover { color: var(--text-1); }
+.source-tab.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #1a1207;
+}
+.source-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pgn-row { display: flex; flex-direction: column; gap: 10px; }
+.pgn-row.hidden { display: none; }
+.pgn-input {
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  resize: vertical;
+  min-height: 96px;
+}
+.pgn-input:focus-visible { outline: none; border-color: var(--accent); }

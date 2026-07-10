@@ -634,6 +634,75 @@ def get_games(username):
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/games/lichess/<username>")
+def get_lichess_games(username):
+    """Import recent games from Lichess — same formatted shape as the Chess.com route
+    so the client renders them identically."""
+    try:
+        count = min(max(int(request.args.get("count", 20)), 5), 100)
+        resp = requests.get(
+            f"https://lichess.org/api/games/user/{username}",
+            headers={"Accept": "application/x-chess-pgn", "User-Agent": "ChessNow/1.0 (personal use)"},
+            params={"max": count, "moves": "true", "opening": "true", "tags": "true"},
+            timeout=15,
+        )
+        if resp.status_code == 404:
+            return jsonify({"error": f'User "{username}" not found on Lichess'}), 404
+        resp.raise_for_status()
+
+        formatted = []
+        stream = io.StringIO(resp.text)
+        while True:
+            game = chess.pgn.read_game(stream)
+            if game is None:
+                break
+            h = game.headers
+            white_name = h.get("White", "White")
+            black_name = h.get("Black", "Black")
+            is_white = white_name.lower() == username.lower()
+            res = h.get("Result", "*")
+            if res == "1-0":
+                player_result = "Win" if is_white else "Loss"
+            elif res == "0-1":
+                player_result = "Loss" if is_white else "Win"
+            elif res == "1/2-1/2":
+                player_result = "Draw"
+            else:
+                player_result = "?"
+
+            date_raw = h.get("UTCDate", h.get("Date", ""))
+            date = ""
+            if date_raw and date_raw != "????.??.??":
+                try:
+                    date = datetime.strptime(date_raw, "%Y.%m.%d").strftime("%b %d")
+                except ValueError:
+                    date = date_raw
+
+            formatted.append({
+                "white":           white_name,
+                "black":           black_name,
+                "white_rating":    h.get("WhiteElo", "?"),
+                "black_rating":    h.get("BlackElo", "?"),
+                "opponent":        black_name if is_white else white_name,
+                "opponent_rating": (h.get("BlackElo") if is_white else h.get("WhiteElo")) or "?",
+                "player_color":    "White" if is_white else "Black",
+                "result":          player_result,
+                "date":            date,
+                "opening":         (h.get("Opening", "Unknown Opening") or "Unknown Opening")[:55],
+                "time_class":      h.get("Speed", "rapid"),
+                "time_control":    h.get("TimeControl", ""),
+                "pgn":             str(game),
+                "url":             h.get("Site", ""),
+            })
+
+        if not formatted:
+            return jsonify({"error": "No games found for this user"}), 404
+        return jsonify({"games": formatted, "username": username, "count": len(formatted)})
+
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
     data = request.json or {}

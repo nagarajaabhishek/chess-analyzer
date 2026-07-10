@@ -437,18 +437,28 @@
       
       <div class="analysis-card-wrap">
         <div class="search-card">
-          <h3 class="search-card-title">Analyze Chess.com Profile</h3>
+          <h3 class="search-card-title">Analyze Your Games</h3>
           <p class="search-card-sub">Run Stockfish 18 locally in your browser — zero cloud footprint.</p>
-          <div class="search-row">
+          <div class="source-toggle" role="tablist" aria-label="Game source">
+            <button class="source-tab active" id="src-chesscom" role="tab" aria-selected="true" data-source="chesscom">Chess.com</button>
+            <button class="source-tab" id="src-lichess" role="tab" aria-selected="false" data-source="lichess">Lichess</button>
+            <button class="source-tab" id="src-pgn" role="tab" aria-selected="false" data-source="pgn">Paste PGN</button>
+          </div>
+          <div class="search-row" id="username-row">
             <div class="input-wrap">
               <span class="input-icon">♙</span>
-              <label for="username-input" class="sr-only">Chess.com username</label>
+              <label for="username-input" class="sr-only">Username</label>
               <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="off" spellcheck="false"/>
             </div>
             <button id="load-btn" class="btn btn-primary">
               <span class="btn-text">Load Games</span>
               <span class="btn-arrow">→</span>
             </button>
+          </div>
+          <div class="pgn-row hidden" id="pgn-row">
+            <label for="pgn-input" class="sr-only">Paste PGN</label>
+            <textarea id="pgn-input" class="pgn-input" rows="5" placeholder="Paste a PGN game here…" spellcheck="false"></textarea>
+            <button id="pgn-analyze-btn" class="btn btn-primary">Analyze PGN →</button>
           </div>
           <div id="home-error" class="inline-error hidden"></div>
         </div>

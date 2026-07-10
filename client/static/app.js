@@ -213,6 +213,54 @@ async function checkStockfish() {
   }
 }
 
+let gameSource = "chesscom";  // "chesscom" | "lichess" (pgn handled separately)
+
+function initGameSourceToggle() {
+  const input = $("username-input");
+  const usernameRow = $("username-row");
+  const pgnRow = $("pgn-row");
+  document.querySelectorAll(".source-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".source-tab").forEach(t => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      const src = tab.dataset.source;
+      if (src === "pgn") {
+        usernameRow.classList.add("hidden");
+        pgnRow.classList.remove("hidden");
+      } else {
+        gameSource = src;
+        usernameRow.classList.remove("hidden");
+        pgnRow.classList.add("hidden");
+        if (input) input.placeholder = src === "lichess" ? "Lichess username" : "Chess.com username";
+      }
+    });
+  });
+
+  const pgnBtn = $("pgn-analyze-btn");
+  if (pgnBtn) {
+    pgnBtn.addEventListener("click", () => {
+      const pgn = $("pgn-input").value.trim();
+      const errEl = $("home-error");
+      errEl.classList.add("hidden");
+      if (!pgn || !/\b[a-hKQRBNO][a-h1-8xO+#=-]*/.test(pgn)) {
+        errEl.textContent = "Paste a valid PGN game to analyze.";
+        errEl.classList.remove("hidden");
+        return;
+      }
+      state.currentGame = {
+        white_player: "White", black_player: "Black", player_color: "White",
+        result: "*", time_control: "", opening: "Pasted PGN",
+      };
+      showView("view-analysis");
+      loadPgnGame(pgn);
+    });
+  }
+}
+
 async function loadGames() {
   const username = $("username-input").value.trim();
   if (!username) return;
@@ -233,12 +281,18 @@ async function loadGames() {
   try {
     let gamesList = [];
     if (hasBackend) {
-      const res = await fetch(`/api/games/${encodeURIComponent(username)}`);
+      const path = gameSource === "lichess"
+        ? `/api/games/lichess/${encodeURIComponent(username)}`
+        : `/api/games/${encodeURIComponent(username)}`;
+      const res = await fetch(path);
       const data = await res.json();
       if (!res.ok || data.error) {
         throw new Error(data.error || "Failed to load games");
       }
       gamesList = data.games;
+    } else if (gameSource === "lichess") {
+      // Lichess public API is CORS-open — fetch directly in browser/Capacitor
+      gamesList = await fetchLichessGamesDirect(username, 20);
     } else {
       // Fetch directly from Chess.com public API in browser/Capacitor
       gamesList = await fetchGamesDirect(username, 20);
@@ -2319,6 +2373,7 @@ $("username-input").value = DEFAULT_USERNAME;
 initPhoneAuth();
 initVoiceCall();
 initLandingPageListeners();
+initGameSourceToggle();
 
 // Initialize dynamic SPA hash routing
 window.addEventListener("hashchange", handleHashRouting);
@@ -2455,6 +2510,59 @@ async function fetchGamesDirect(username, count = 20) {
     });
   }
 
+  return formatted;
+}
+
+// Client-only Lichess import (CORS-open API). Splits the concatenated PGN
+// stream into games and pulls headers — mirrors the server's formatted shape.
+async function fetchLichessGamesDirect(username, count = 20) {
+  const res = await customFetch(
+    `https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${count}&moves=true&opening=true&tags=true`,
+    { headers: { "Accept": "application/x-chess-pgn" } }
+  );
+  if (!res.ok) throw new Error("User not found on Lichess");
+  const text = await res.text();
+  if (!text.trim()) throw new Error("No games found for this user");
+
+  const chunks = text.trim().split(/\n\n(?=\[Event )/);
+  const tag = (block, name) => {
+    const m = block.match(new RegExp(`\\[${name} "([^"]*)"\\]`));
+    return m ? m[1] : "";
+  };
+  const formatted = [];
+  for (const block of chunks) {
+    const white = tag(block, "White") || "White";
+    const black = tag(block, "Black") || "Black";
+    const isWhite = white.toLowerCase() === username.toLowerCase();
+    const res2 = tag(block, "Result");
+    let result = "?";
+    if (res2 === "1-0") result = isWhite ? "Win" : "Loss";
+    else if (res2 === "0-1") result = isWhite ? "Loss" : "Win";
+    else if (res2 === "1/2-1/2") result = "Draw";
+    const dateRaw = tag(block, "UTCDate") || tag(block, "Date");
+    let date = "";
+    if (dateRaw && dateRaw !== "????.??.??") {
+      const parts = dateRaw.split(".");
+      if (parts.length === 3) {
+        const d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      }
+    }
+    formatted.push({
+      white, black,
+      white_rating: tag(block, "WhiteElo") || "?",
+      black_rating: tag(block, "BlackElo") || "?",
+      opponent: isWhite ? black : white,
+      opponent_rating: (isWhite ? tag(block, "BlackElo") : tag(block, "WhiteElo")) || "?",
+      player_color: isWhite ? "White" : "Black",
+      result, date,
+      opening: (tag(block, "Opening") || "Unknown Opening").slice(0, 55),
+      time_class: tag(block, "Speed") || "rapid",
+      time_control: tag(block, "TimeControl") || "",
+      pgn: block,
+      url: tag(block, "Site") || "",
+    });
+  }
   return formatted;
 }
 
