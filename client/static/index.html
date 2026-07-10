@@ -293,6 +293,18 @@
         <div class="bar"></div>
         <span>Speak to Thara to start playing</span>
       </div>
+
+      <!-- Hear the product before dialing (expansion-v2 item 10) -->
+      <div class="sample-call hidden" id="sample-call">
+        <button id="btn-sample-call" class="btn-sample" type="button" aria-controls="sample-transcript">▶&nbsp; Hear a sample call</button>
+        <ol id="sample-transcript" class="sample-transcript hidden" aria-label="Sample call transcript">
+          <li data-who="thara"><span class="who">Thara</span>Welcome to ChessNow! I'm Thara, your chess companion. You're playing White — what's your first move?</li>
+          <li data-who="caller"><span class="who">Caller</span>Pawn to e4.</li>
+          <li data-who="thara"><span class="who">Thara</span>e4 — a classic. I'll reply c5, the Sicilian Defence. Your move.</li>
+          <li data-who="caller"><span class="who">Caller</span>What's on e4?</li>
+          <li data-who="thara"><span class="who">Thara</span>Your pawn is on e4. You can ask me about the board any time — no screen needed.</li>
+        </ol>
+      </div>
     </div>
   </section>
 
@@ -409,6 +421,7 @@
     <div class="section-container">
       <h2 class="section-title">Live Ongoing Games</h2>
       <p class="section-subtitle">Real-time games being played over the voice hotline.</p>
+      <p id="public-stats" class="public-stats hidden" aria-live="polite"></p>
       <div id="live-games-container" class="live-games-grid">
         <div class="live-game-placeholder-card">
           <p>Checking for live games...</p>

@@ -1924,10 +1924,26 @@ async function loadConfig() {
   }
 }
 
+async function loadPublicStats() {
+  const el = $("public-stats");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/stats/public");
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s.voice_games_total > 0) {
+      el.innerHTML = `♟ <strong>${Number(s.voice_games_total).toLocaleString()}</strong> games played by phone · ` +
+                     `📞 <strong>${Number(s.calls_total).toLocaleString()}</strong> calls answered`;
+      el.classList.remove("hidden");
+    }
+  } catch (_) { /* social proof is optional — never break the page */ }
+}
+
 async function loadLiveGames() {
   const container = $("live-games-container");
   if (!container) return;
-  
+  loadPublicStats();
+
   try {
     const res = await fetch("/api/games/live");
     if (!res.ok) throw new Error("Failed to fetch live games");
@@ -1976,7 +1992,53 @@ async function loadLiveGames() {
   }
 }
 
+function initSampleCall() {
+  // "Hear a sample call" hero demo — browser TTS so the product can demo its
+  // own medium. Swap in a recorded clip later by replacing speakLine's engine.
+  const wrap = $("sample-call");
+  const btn = $("btn-sample-call");
+  const transcript = $("sample-transcript");
+  if (!wrap || !btn || !transcript || !("speechSynthesis" in window)) return;
+
+  wrap.classList.remove("hidden");
+  const lines = Array.from(transcript.querySelectorAll("li"));
+  let playing = false;
+
+  function stop() {
+    window.speechSynthesis.cancel();
+    playing = false;
+    lines.forEach(li => li.classList.remove("speaking"));
+    btn.textContent = "▶  Hear a sample call";
+  }
+
+  function speakLine(i) {
+    if (!playing || i >= lines.length) { stop(); return; }
+    lines.forEach(li => li.classList.remove("speaking"));
+    const li = lines[i];
+    li.classList.add("speaking");
+    const text = li.textContent.replace(/^(Thara|Caller)/, "");
+    const u = new SpeechSynthesisUtterance(text);
+    u.pitch = li.dataset.who === "thara" ? 1.15 : 0.9;
+    u.rate = 1.0;
+    u.onend = () => setTimeout(() => speakLine(i + 1), 300);
+    u.onerror = stop;
+    window.speechSynthesis.speak(u);
+  }
+
+  btn.addEventListener("click", () => {
+    if (playing) { stop(); transcript.classList.add("hidden"); return; }
+    playing = true;
+    transcript.classList.remove("hidden");
+    btn.textContent = "■  Stop";
+    window.speechSynthesis.cancel();
+    speakLine(0);
+  });
+
+  window.addEventListener("pagehide", stop);
+}
+
 function initLandingPageListeners() {
+  initSampleCall();
   const dialPhoneBtn = $("btn-dial-phone");
   if (dialPhoneBtn) {
     dialPhoneBtn.addEventListener("click", () => {
