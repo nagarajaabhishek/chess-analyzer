@@ -93,6 +93,9 @@ with app.app_context():
         if "sms_opt_out" not in _existing_cols:
             db.session.execute(db.text("ALTER TABLE users ADD COLUMN sms_opt_out BOOLEAN DEFAULT FALSE"))
             db.session.commit()
+        if "display_name" not in _existing_cols:
+            db.session.execute(db.text("ALTER TABLE users ADD COLUMN display_name VARCHAR(40)"))
+            db.session.commit()
 
     if "call_logs" in _inspector.get_table_names():
         _existing_cols = {c["name"] for c in _inspector.get_columns("call_logs")}
@@ -1369,13 +1372,17 @@ def send_challenge_invite_sms(opponent_phone: str, challenger_phone: str):
         digits_only = "1" + digits_only
     to_e164 = f"+{digits_only}"
 
-    ch_digits = "".join(filter(str.isdigit, challenger_phone))
-    if len(ch_digits) == 10:
-        ch_digits = "1" + ch_digits
-    challenger_display = f"+{ch_digits}"
+    challenger_user = db.session.get(User, challenger_phone)
+    if challenger_user and challenger_user.display_name:
+        challenger_display = challenger_user.display_name
+    else:
+        ch_digits = "".join(filter(str.isdigit, challenger_phone))
+        if len(ch_digits) == 10:
+            ch_digits = "1" + ch_digits
+        challenger_display = f"+{ch_digits}"
 
     body = (
-        f"♟ ChessNow: your friend at {challenger_display} challenged you to voice chess! "
+        f"♟ ChessNow: {challenger_display} challenged you to voice chess! "
         f"Call {TWILIO_PHONE_NUMBER} from any phone to play — no app or account needed. "
         f"Reply STOP to opt out."
     )
@@ -2034,6 +2041,174 @@ def voice_call_status():
             log.duration_seconds = int(duration)
         db.session.commit()
     return ("", 204)
+
+
+def _friendly_name(phone_clean):
+    """Display name for a phone: the user's chosen name, else 'Player 1234'."""
+    user = db.session.get(User, phone_clean) if phone_clean else None
+    if user and user.display_name:
+        return user.display_name
+    return f"Player {phone_clean[-4:]}" if phone_clean else "your opponent"
+
+
+def _weekly_streak(phone_clean, now_time):
+    """Consecutive weeks (including the current one) with at least one game."""
+    streak = 0
+    for wk in range(0, 12):
+        start = now_time - timedelta(days=7 * (wk + 1))
+        end = now_time - timedelta(days=7 * wk)
+        played = db.session.execute(
+            select(func.count(Game.id)).filter(
+                Game.user_phone == phone_clean,
+                Game.source.in_(["voice_bot", "voice_pvp"]),
+                Game.created_at >= start, Game.created_at < end)
+        ).scalar() or 0
+        if played > 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def build_weekly_digest(user, now_time=None):
+    """Compose a caller's weekly digest SMS. Returns the body string, or None
+    if they had no games this week (nothing to say)."""
+    now_time = now_time or datetime.now(timezone.utc).replace(tzinfo=None)
+    week_start = now_time - timedelta(days=7)
+    phone = user.phone_number
+
+    games = db.session.execute(
+        select(Game).filter(
+            Game.user_phone == phone,
+            Game.source.in_(["voice_bot", "voice_pvp"]),
+            Game.created_at >= week_start)
+        .order_by(Game.created_at.desc())
+    ).scalars().all()
+    if not games:
+        return None
+
+    wins = losses = draws = 0
+    accs, worst = [], None
+    for g in games:
+        color = g.player_color or ("white" if g.white_phone == phone else "black")
+        if g.result == "1-0":
+            wins += 1 if color == "white" else 0
+            losses += 1 if color == "black" else 0
+        elif g.result == "0-1":
+            wins += 1 if color == "black" else 0
+            losses += 1 if color == "white" else 0
+        elif g.result == "1/2-1/2":
+            draws += 1
+        acc = g.white_accuracy if color == "white" else g.black_accuracy
+        if acc:
+            accs.append(acc)
+            if worst is None or acc < worst[1]:
+                worst = (g.id, acc)
+
+    name = user.display_name or "there"
+    avg_acc = round(sum(accs) / len(accs), 1) if accs else None
+    streak = _weekly_streak(phone, now_time)
+
+    parts = [f"♟ ChessNow weekly recap — hi {name}!"]
+    parts.append(f"{len(games)} game{'s' if len(games) != 1 else ''} this week ({wins}W-{losses}L-{draws}D).")
+    if avg_acc is not None:
+        parts.append(f"Avg accuracy {avg_acc}%.")
+    parts.append(f"Rating {user.elo or 1000}.")
+    if streak >= 2:
+        parts.append(f"🔥 {streak}-week streak — keep it going!")
+    if worst:
+        parts.append(f"Review your trickiest game: {BASE_URL}/?game={worst[0]}")
+    parts.append("Reply STOP to opt out.")
+    return " ".join(parts)
+
+
+def _send_sms_async(to_phone, body, opt_out_check=True):
+    """Fire-and-forget Twilio SMS (background thread). Respects sms_opt_out."""
+    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
+        print("⚠️  SMS skipped — Twilio credentials incomplete.")
+        return False
+    digits = "".join(filter(str.isdigit, to_phone))
+    if len(digits) == 10:
+        digits = "1" + digits
+    to_e164 = f"+{digits}"
+
+    def _send():
+        try:
+            resp = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+                auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                data={"From": TWILIO_PHONE_NUMBER, "To": to_e164, "Body": body},
+                timeout=10,
+            )
+            if resp.status_code != 201:
+                print(f"⚠️  Digest SMS error {resp.status_code}: {resp.text[:160]}")
+        except Exception as exc:
+            print(f"⚠️  Digest SMS exception: {exc}")
+
+    threading.Thread(target=_send, daemon=True).start()
+    return True
+
+
+@app.route("/api/user/name", methods=["POST"])
+@token_required
+def set_display_name():
+    """Let a verified user set the friendly name used in SMS and PvP labels."""
+    data = request.json or {}
+    phone_clean = "".join(filter(str.isdigit, data.get("phone", "")))
+    if phone_clean != request.phone_clean:
+        return jsonify({"error": "Unauthorized user phone"}), 403
+    name = (data.get("name") or "").strip()[:40]
+    user = db.session.get(User, phone_clean)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    user.display_name = name or None
+    db.session.commit()
+    return jsonify({"status": "ok", "display_name": user.display_name})
+
+
+@app.route("/api/admin/send_digests", methods=["POST"])
+def admin_send_digests():
+    """Send weekly digest SMS to callers active in the last 7 days.
+
+    Cron-triggerable (weekly) like the keepalive workflow. ADMIN_TOKEN required.
+    ?dry_run=1 returns the composed messages without sending — safe to test.
+    """
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    dry_run = request.args.get("dry_run") in ("1", "true")
+
+    with app.app_context():
+        now_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        week_start = now_time - timedelta(days=7)
+        active_phones = db.session.execute(
+            select(Game.user_phone).filter(
+                Game.source.in_(["voice_bot", "voice_pvp"]),
+                Game.created_at >= week_start,
+                Game.user_phone != None)
+            .distinct()
+        ).scalars().all()
+
+        sent, skipped, previews = 0, 0, []
+        for phone in active_phones:
+            user = db.session.get(User, phone)
+            if not user or user.sms_opt_out:
+                skipped += 1
+                continue
+            body = build_weekly_digest(user, now_time)
+            if not body:
+                skipped += 1
+                continue
+            if dry_run:
+                previews.append({"phone": f"***{phone[-4:]}", "body": body})
+            else:
+                _send_sms_async(phone, body)
+            sent += 1
+
+        result = {"eligible": len(active_phones), "sent": sent, "skipped": skipped, "dry_run": dry_run}
+        if dry_run:
+            result["previews"] = previews
+        return jsonify(result)
 
 
 @app.route("/api/metrics/event", methods=["POST"])

@@ -9,6 +9,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     elo = db.Column(db.Integer, default=1000)
     sms_opt_out = db.Column(db.Boolean, default=False)  # STOP replies / Twilio 21610
+    display_name = db.Column(db.String(40), nullable=True)  # friendly name for SMS / PvP labels
     
     # Relationship to games
     games = db.relationship("Game", backref="user", lazy=True, cascade="all, delete-orphan")

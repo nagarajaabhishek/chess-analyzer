@@ -1,0 +1,32 @@
+name: Weekly digest SMS
+
+# Sends each active caller a weekly recap SMS (games, accuracy, rating,
+# streak, worst-game review link). Mirrors the keepalive workflow's shape.
+#
+# Fires Sundays at 17:00 UTC (~11am-12pm US Central depending on DST).
+# Requires an ADMIN_TOKEN repository secret matching the server's env var.
+# The endpoint itself no-ops safely if a user had no games or opted out.
+on:
+  schedule:
+    - cron: "0 17 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview messages without sending (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly digests
+        run: |
+          DRY="${{ github.event.inputs.dry_run }}"
+          URL="https://chessnow.app/api/admin/send_digests"
+          if [ "$DRY" = "true" ]; then URL="$URL?dry_run=1"; fi
+          curl -sS -m 120 --retry 2 --retry-delay 15 \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.ADMIN_TOKEN }}" \
+            -w "\nHTTP %{http_code} in %{time_total}s\n" \
+            "$URL"
