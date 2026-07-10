@@ -3621,3 +3621,58 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
 
 
 
+
+/* ── Public stats counter (expansion-v2 item 12) ── */
+.public-stats {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-2);
+  margin: -6px 0 18px;
+}
+.public-stats strong { color: var(--accent); font-weight: 600; }
+.public-stats.hidden { display: none; }
+
+/* ── Hero sample-call demo (expansion-v2 item 10) ── */
+.sample-call { margin-top: 18px; width: 100%; max-width: 460px; }
+.sample-call.hidden { display: none; }
+.btn-sample {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 13px;
+  padding: 8px 18px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.btn-sample:hover, .btn-sample:focus-visible { border-color: var(--accent); color: var(--accent); }
+.sample-transcript {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.sample-transcript.hidden { display: none; }
+.sample-transcript li {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-2);
+  transition: border-color 0.25s, color 0.25s;
+}
+.sample-transcript li[data-who="thara"] { background: var(--accent-glow); }
+.sample-transcript li.speaking { border-color: var(--accent); color: #fff; }
+.sample-transcript .who {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}

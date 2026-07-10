@@ -516,6 +516,19 @@ def _public_player_name(name):
     return "Anonymous"
 
 
+@app.route("/api/stats/public")
+def get_public_stats():
+    """Aggregate-only social proof for the homepage — no per-user or per-game data."""
+    try:
+        voice_games = db.session.execute(
+            db.select(func.count(Game.id)).filter(Game.source.in_(["voice_bot", "voice_pvp"]))
+        ).scalar() or 0
+        calls = db.session.execute(db.select(func.count(CallLog.id))).scalar() or 0
+        return jsonify({"voice_games_total": voice_games, "calls_total": calls})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/games/live")
 def get_live_games():
     try:
