@@ -223,10 +223,10 @@ function initGameSourceToggle() {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".source-tab").forEach(t => {
         t.classList.remove("active");
-        t.setAttribute("aria-selected", "false");
+        t.setAttribute("aria-pressed", "false");
       });
       tab.classList.add("active");
-      tab.setAttribute("aria-selected", "true");
+      tab.setAttribute("aria-pressed", "true");
       const src = tab.dataset.source;
       if (src === "pgn") {
         usernameRow.classList.add("hidden");

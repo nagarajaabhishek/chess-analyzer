@@ -3375,7 +3375,7 @@ body {
 .use-case-note {
   font-size: 12.5px;
   font-style: italic;
-  color: var(--text-3);
+  color: var(--text-2); /* WCAG AA: --text-3 measured 3.42:1 (fail); --text-2 is 7.71:1 */
   line-height: 1.5;
   margin: 12px 0 0;
   padding-top: 12px;
@@ -3814,3 +3814,16 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
   background: rgba(212, 160, 85, 0.06);
 }
 .btn-share-card.hidden { display: none; }
+
+/* ── Reduced-motion safety net (WCAG 2.2.2 / 2.3.3, expansion-v2 item 18) ──
+   Respects the OS "reduce motion" preference: neutralizes the continuous
+   decorative animations (voice-indicator bars, hero glow, mic pulse, etc.)
+   and long transitions for users who are motion-sensitive. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -439,10 +439,10 @@
         <div class="search-card">
           <h3 class="search-card-title">Analyze Your Games</h3>
           <p class="search-card-sub">Run Stockfish 18 locally in your browser — zero cloud footprint.</p>
-          <div class="source-toggle" role="tablist" aria-label="Game source">
-            <button class="source-tab active" id="src-chesscom" role="tab" aria-selected="true" data-source="chesscom">Chess.com</button>
-            <button class="source-tab" id="src-lichess" role="tab" aria-selected="false" data-source="lichess">Lichess</button>
-            <button class="source-tab" id="src-pgn" role="tab" aria-selected="false" data-source="pgn">Paste PGN</button>
+          <div class="source-toggle" role="group" aria-label="Game source">
+            <button class="source-tab active" id="src-chesscom" type="button" aria-pressed="true" data-source="chesscom">Chess.com</button>
+            <button class="source-tab" id="src-lichess" type="button" aria-pressed="false" data-source="lichess">Lichess</button>
+            <button class="source-tab" id="src-pgn" type="button" aria-pressed="false" data-source="pgn">Paste PGN</button>
           </div>
           <div class="search-row" id="username-row">
             <div class="input-wrap">
@@ -508,6 +508,7 @@
       <h3>🤖 Call Thara</h3>
       <p>Thara is your chess assistant and companion. She dynamically matches your Elo rating (±20 Elo) for a formal, balanced game.</p>
       <div class="bot-selector-row">
+        <label for="personality-select" class="sr-only">Thara's commentary style</label>
         <select id="personality-select" class="bot-select-dropdown" style="margin-right: 10px;">
           <option value="formal" selected>Formal Coach 👩🏼‍💼</option>
           <option value="minimal">Minimalist (Moves Only) 🔇</option>
