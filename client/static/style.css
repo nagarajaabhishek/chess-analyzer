@@ -3370,27 +3370,17 @@ body {
   margin-bottom: 20px;
   flex-grow: 1;
 }
-.use-case-keywords {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: auto;
-}
-.keyword-tag {
-  font-family: var(--mono);
-  font-size: 10px;
+/* Honest one-line descriptor replacing the old SEO keyword clouds
+   (keywords now live only in <meta>, not shown to humans). */
+.use-case-note {
+  font-size: 12.5px;
+  font-style: italic;
   color: var(--text-3);
-  background: rgba(212, 160, 85, 0.04);
-  border: 1px solid rgba(212, 160, 85, 0.1);
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-.use-case-card:hover .keyword-tag {
-  color: var(--text-2);
-  background: rgba(212, 160, 85, 0.08);
-  border-color: rgba(212, 160, 85, 0.2);
+  line-height: 1.5;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(212, 160, 85, 0.12);
+  margin-top: auto;
 }
 
 /* ── SCREEN READER AND ACCESSIBILITY COMPLIANCE ── */
