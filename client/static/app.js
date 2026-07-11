@@ -344,6 +344,7 @@ function renderGames(games, username) {
   const container = $("games-list");
   $("games-title").textContent = `Recent Games`;
   $("games-sub").textContent = `${username} · ${games.length} games`;
+  $("games-connect-prompt")?.classList.toggle("hidden", games.length > 0);
 
   if (!games.length) {
     container.innerHTML = `<div class="inline-error">No games found.</div>`;
@@ -2347,6 +2348,20 @@ function initLandingPageListeners() {
     });
   }
 
+  const gamesConnectBtn = $("btn-games-connect");
+  if (gamesConnectBtn) {
+    gamesConnectBtn.addEventListener("click", () => {
+      const target = $("section-analysis");
+      showView("view-home");
+      if (target) target.scrollIntoView({ behavior: "smooth" });
+    });
+  }
+
+  const gamesPlayBtn = $("btn-games-play");
+  if (gamesPlayBtn) {
+    gamesPlayBtn.addEventListener("click", () => enterPlayLobby());
+  }
+
   const aboutLink = $("footer-link-about");
   if (aboutLink) {
     aboutLink.addEventListener("click", (e) => {
@@ -3234,6 +3249,18 @@ function enterPlayLobby() {
   showView("view-play");
 }
 
+// App-only games hub: your games + connect chess.com/Lichess/PGN + a way to
+// start a voice game. This is where the native app lands after login instead
+// of the marketing home's Call Thara lobby.
+function enterGamesHub() {
+  document.querySelectorAll(".games-tab").forEach(t => t.classList.toggle("active", t.dataset.gamestab === "voice"));
+  $("group-chesscom-games").classList.add("hidden");
+  $("group-voice-games").classList.remove("hidden");
+  showView("view-games");
+  loadUserSavedGames();
+  loadPendingChallenges();
+}
+
 function initPhoneAuth() {
   const phone = localStorage.getItem("userPhone");
   if (phone) {
@@ -3246,21 +3273,29 @@ function initPhoneAuth() {
   if (homePlayBtn) {
     homePlayBtn.addEventListener("click", () => {
       const activePhone = localStorage.getItem("userPhone");
+      const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
       if (!activePhone) {
         window.authRedirectView = "view-play";
         resetAuthOverlay();
         $("auth-overlay").classList.remove("hidden");
+      } else if (isNative) {
+        enterGamesHub();
       } else {
         enterPlayLobby();
       }
     });
   }
 
-  // Play Lobby Lobby: Back to home
+  // Play Lobby: back to the games hub on the app, marketing home on the web
   const playBackBtn = $("play-back");
   if (playBackBtn) {
     playBackBtn.addEventListener("click", () => {
-      showView("view-home");
+      const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+      if (isNative && localStorage.getItem("userPhone")) {
+        showView("view-games");
+      } else {
+        showView("view-home");
+      }
     });
   }
 
@@ -3331,7 +3366,13 @@ function initPhoneAuth() {
       localStorage.setItem("sessionToken", data.token);
       $("auth-overlay").classList.add("hidden");
 
-      if (window.authRedirectView === "view-play") {
+      const isNative = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+      if (window.authRedirectView === "view-play" && isNative) {
+        // On the app, login lands on the games hub (your games + connect
+        // chess.com/Lichess/PGN) rather than the Call Thara lobby.
+        window.authRedirectView = null;
+        enterGamesHub();
+      } else if (window.authRedirectView === "view-play") {
         window.authRedirectView = null;
         enterPlayLobby();
       } else if (window.authRedirectView === "voice-tab") {
@@ -3806,6 +3847,14 @@ async function startAgentSession() {
   overlay.classList.remove("hidden");
   $("agent-board-panel")?.classList.remove("hidden");
   $("call-text-fallback")?.classList.add("hidden");
+
+  // Reset any "hide board" preference left over from a previous session.
+  const boardToggleBtn = $("btn-agent-board-toggle");
+  $("agent-board")?.classList.remove("hidden");
+  if (boardToggleBtn) {
+    boardToggleBtn.setAttribute("aria-expanded", "true");
+    boardToggleBtn.textContent = "🙈 Hide board";
+  }
 
   const botName = "Thara";
   $("call-avatar").textContent = "👩🏼‍💼";
