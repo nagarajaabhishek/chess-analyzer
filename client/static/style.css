@@ -2547,7 +2547,7 @@ body {
 }
 
 
-/* ── Voice Call Overlay Screen ── */
+/* ── Voice Call / Agent Overlay Screen ── */
 .voice-call-overlay {
   position: fixed;
   top: 0;
@@ -2558,11 +2558,59 @@ body {
   backdrop-filter: blur(10px);
   z-index: 9999;
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  overflow-y: auto;
+  padding: 24px 16px;
+  color: var(--text-1);
+}
+.call-panel {
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--text-1);
+  flex-shrink: 0;
 }
+
+/* Live board shown alongside the Agent (vs Thara) voice session — hidden for
+   PvP phone-simulation sessions, which have no FEN available client-side. */
+.agent-board-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+.agent-board {
+  width: min(360px, 80vw);
+}
+.agent-board-toggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.agent-board-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 720px) {
+  .voice-call-overlay {
+    flex-direction: column;
+    gap: 20px;
+    padding-top: 40px;
+  }
+  .agent-board {
+    width: min(280px, 78vw);
+  }
+}
+
 .call-avatar-container {
   position: relative;
   width: 120px;
@@ -3750,6 +3798,39 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
 }
 .speak-cta:hover, .speak-cta:focus-visible { background: var(--accent-glow); }
 .speak-cta.hidden { display: none; }
+
+/* ── Native app shell (iOS Capacitor) ──────────────────────
+   It's an app, not a landing page: hide marketing copy/sections
+   and leave only Play + Analyze. Toggled via .native-app on <html>,
+   set synchronously in index.html before first paint. */
+.native-app-intro { display: none; }
+.native-app-show { display: none; }
+html.native-app .native-app-intro { display: block; }
+html.native-app .native-app-show { display: inline; }
+html.native-app .native-app-hide { display: none; }
+
+html.native-app .hero-logo-group,
+html.native-app .hero-content > .hero-title,
+html.native-app .hero-content > .hero-tagline,
+html.native-app .phone-display-section,
+html.native-app .hero-content > .hero-sub,
+html.native-app .voice-indicator,
+html.native-app #sample-call,
+html.native-app #speak-demo,
+html.native-app .home-features,
+html.native-app .trust-strip,
+html.native-app .home-use-cases,
+html.native-app .home-live-games,
+html.native-app .footer {
+  display: none !important;
+}
+
+html.native-app .nav-links a[href="#home"],
+html.native-app .nav-links a[href="#faq"],
+html.native-app .nav-links a[href="#voice-commands"],
+html.native-app .nav-links a[href="#about"] {
+  display: none;
+}
 
 /* ── Game-source toggle + PGN paste (expansion-v2 item 14) ── */
 .source-toggle {

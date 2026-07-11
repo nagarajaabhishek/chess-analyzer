@@ -128,7 +128,10 @@ def add_cors_headers(response):
             "http://localhost:5173",
             "http://localhost:5174",
             "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174"
+            "http://127.0.0.1:5174",
+            # iOS Capacitor app — bundles static assets locally and calls the API
+            # cross-origin from its capacitor:// scheme instead of same-origin.
+            "capacitor://localhost"
         ]
         if origin in allowed_origins or origin.endswith(".chessnow.app"):
             response.headers["Access-Control-Allow-Origin"] = origin

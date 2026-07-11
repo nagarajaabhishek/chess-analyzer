@@ -30,6 +30,15 @@ const state = {
 let useLocalWasm = false;
 let hasBackend = false;
 
+// The iOS app (Capacitor) only bundles static assets — there's no server co-hosted
+// at its own origin like there is on the web (chessnow.app serves both). So on native
+// platforms every /api/* call needs an absolute URL to the real backend; on web, a
+// relative path keeps working same-origin as it always has.
+const API_BASE = (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+  ? "https://chessnow.app"
+  : "";
+const apiUrl = path => API_BASE + path;
+
 // Classification display config
 const CLS = {
   best:       { label: "Best",       color: "#22c55e", symbol: "✓" },
@@ -193,7 +202,7 @@ async function checkStockfish() {
   const badge = $("sf-status");
   badge.classList.remove("hidden");
   try {
-    const res = await fetch("/api/check");
+    const res = await fetch(apiUrl("/api/check"));
     const data = await res.json();
     hasBackend = true;
     if (data.ok) {
@@ -466,7 +475,7 @@ async function startAnalysis(game) {
   }
 
   try {
-    const res = await fetch("/api/analyze", {
+    const res = await fetch(apiUrl("/api/analyze"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -489,7 +498,7 @@ function pollAnalysis(taskId) {
 
   state.pollTimer = setInterval(async () => {
     try {
-      const res = await fetch(`/api/status/${taskId}`);
+      const res = await fetch(apiUrl(`/api/status/${taskId}`));
       const data = await res.json();
 
       // Update progress bar
@@ -1101,7 +1110,7 @@ async function triggerLiveEvaluation(fen) {
   state.liveEvalAbortController = new AbortController();
 
   try {
-    const res = await fetch("/api/live_eval", {
+    const res = await fetch(apiUrl("/api/live_eval"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fen }),
@@ -1962,7 +1971,7 @@ function formatPhoneNumber(phoneNumberString) {
 
 async function loadConfig() {
   try {
-    const res = await fetch("/api/config");
+    const res = await fetch(apiUrl("/api/config"));
     if (res.ok) {
       const data = await res.json();
       if (data.phone_number) {
@@ -1986,7 +1995,7 @@ async function loadPublicStats() {
   const el = $("public-stats");
   if (!el) return;
   try {
-    const res = await fetch("/api/stats/public");
+    const res = await fetch(apiUrl("/api/stats/public"));
     if (!res.ok) return;
     const s = await res.json();
     if (s.voice_games_total > 0) {
@@ -2003,7 +2012,7 @@ async function loadLiveGames() {
   loadPublicStats();
 
   try {
-    const res = await fetch("/api/games/live");
+    const res = await fetch(apiUrl("/api/games/live"));
     if (!res.ok) throw new Error("Failed to fetch live games");
     const data = await res.json();
     const games = data.games || [];
@@ -2263,7 +2272,7 @@ function initLandingPageListeners() {
         if (navigator.sendBeacon) {
           navigator.sendBeacon("/api/metrics/event", new Blob([payload], { type: "application/json" }));
         } else {
-          fetch("/api/metrics/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+          fetch(apiUrl("/api/metrics/event"), { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
         }
       } catch (_) { /* never block the dial action */ }
       const displayEl = $("phone-number-display");
@@ -3280,7 +3289,7 @@ function initPhoneAuth() {
     if (!rawPhone) return alert("Please enter your phone number.");
 
     try {
-      const res = await fetch("/api/auth", {
+      const res = await fetch(apiUrl("/api/auth"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: rawPhone })
@@ -3310,7 +3319,7 @@ function initPhoneAuth() {
     if (!rawPhone || !rawOtp) return alert("Please enter both phone number and verification code.");
 
     try {
-      const res = await fetch("/api/auth/verify", {
+      const res = await fetch(apiUrl("/api/auth/verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: rawPhone, code: rawOtp })
@@ -3396,7 +3405,7 @@ function initPvpChallengeUI() {
 
     try {
       const token = localStorage.getItem("sessionToken") || "";
-      const res = await fetch("/api/voice/challenge", {
+      const res = await fetch(apiUrl("/api/voice/challenge"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -3422,7 +3431,7 @@ async function loadPendingChallenges() {
 
   try {
     const token = localStorage.getItem("sessionToken") || "";
-    const res = await fetch(`/api/voice/pending_challenges?phone=${phone}`, {
+    const res = await fetch(apiUrl(`/api/voice/pending_challenges?phone=${phone}`), {
       headers: {
         "Authorization": `Bearer ${token}`
       }
@@ -3456,7 +3465,7 @@ async function loadPendingChallenges() {
       item.querySelector('[data-action="decline"]').addEventListener("click", async () => {
         try {
           const token = localStorage.getItem("sessionToken") || "";
-          await fetch("/api/voice/decline_challenge", {
+          await fetch(apiUrl("/api/voice/decline_challenge"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -3485,7 +3494,7 @@ async function loadUserSavedGames() {
 
   try {
     const token = localStorage.getItem("sessionToken") || "";
-    const res = await fetch(`/api/games?phone=${phone}`, {
+    const res = await fetch(apiUrl(`/api/games?phone=${phone}`), {
       headers: {
         "Authorization": `Bearer ${token}`
       }
@@ -3534,7 +3543,7 @@ async function loadUserSavedGames() {
 // opening off it immediately, and would throw on a null currentGame otherwise.
 async function loadGameById(gameId) {
   try {
-    const res = await fetch(`/api/game/${gameId}`);
+    const res = await fetch(apiUrl(`/api/game/${gameId}`));
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "Game not found");
 
@@ -3561,7 +3570,7 @@ function loadPgnGame(pgn, gameId = null) {
   if (gameId) {
     bodyData.game_id = gameId;
   }
-  fetch("/api/analyze", {
+  fetch(apiUrl("/api/analyze"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(bodyData)
@@ -3584,6 +3593,13 @@ let isCallActive = false;
 let currentCallPhone = "";
 let currentBotElo = "1500";
 let currentPersonality = "formal";
+
+// Which flavor of overlay session is running — "agent" (vs Thara, JSON API + live board)
+// or "pvp" (phone-call simulation via the TwiML voice endpoints). Both share the same
+// overlay DOM, so control-button handlers dispatch on this instead of duplicating markup.
+let activeSessionMode = null;
+let currentGameId = null;
+let agentBoard = null;
 
 // Tracks where the NEXT input should be sent and whether a menu (promotion/disambiguation)
 // is currently pending — a real Twilio call just waits on the <Gather> for this, but the
@@ -3610,13 +3626,14 @@ function applyTwimlState(xmlText) {
 }
 
 function initVoiceCall() {
-  // btn-games-call lives on the games list page; the other two are on the analysis board.
-  const callButtons = ["btn-desktop-call", "btn-mobile-call", "btn-games-call"];
-  callButtons.forEach(id => {
+  // These all start an Agent (vs Thara) session: btn-games-call lives on the Play Lobby,
+  // the other two are the quick-access buttons on the analysis board.
+  const agentButtons = ["btn-desktop-call", "btn-mobile-call", "btn-games-call"];
+  agentButtons.forEach(id => {
     const btn = $(id);
     if (btn) {
       btn.addEventListener("click", () => {
-        startVoiceCall();
+        startAgentSession();
       });
     }
   });
@@ -3635,13 +3652,23 @@ function initVoiceCall() {
     });
   }
 
+  const boardToggleBtn = $("btn-agent-board-toggle");
+  if (boardToggleBtn) {
+    boardToggleBtn.addEventListener("click", () => {
+      const board = $("agent-board");
+      const nowHidden = board.classList.toggle("hidden");
+      boardToggleBtn.setAttribute("aria-expanded", String(!nowHidden));
+      boardToggleBtn.textContent = nowHidden ? "👁 Show board" : "🙈 Hide board";
+    });
+  }
+
   // On-screen equivalents of the phone-keypad shortcuts, for callers with no keypad.
   const resignBtn = $("btn-call-resign");
-  if (resignBtn) resignBtn.addEventListener("click", () => { if (!pendingChoiceActive) sendMoveToVoiceBackend("resign"); });
+  if (resignBtn) resignBtn.addEventListener("click", () => { if (!pendingChoiceActive) submitControlAction("resign"); });
   const drawBtn = $("btn-call-draw");
-  if (drawBtn) drawBtn.addEventListener("click", () => { if (!pendingChoiceActive) sendMoveToVoiceBackend("draw"); });
+  if (drawBtn) drawBtn.addEventListener("click", () => { if (!pendingChoiceActive) submitControlAction("draw"); });
   const takebackBtn = $("btn-call-takeback");
-  if (takebackBtn) takebackBtn.addEventListener("click", () => { if (!pendingChoiceActive) sendMoveToVoiceBackend("takeback"); });
+  if (takebackBtn) takebackBtn.addEventListener("click", () => { if (!pendingChoiceActive) submitControlAction("takeback"); });
 
   // Text-input fallback for browsers/devices without SpeechRecognition (e.g. iOS/Safari).
   const sendTextBtn = $("btn-call-text-send");
@@ -3649,23 +3676,43 @@ function initVoiceCall() {
   const submitTypedMove = () => {
     const value = textInput.value.trim();
     if (!value) return;
-    sendMoveToVoiceBackend(value);
+    submitUserMove(value);
     textInput.value = "";
   };
   if (sendTextBtn) sendTextBtn.addEventListener("click", submitTypedMove);
   if (textInput) textInput.addEventListener("keydown", e => { if (e.key === "Enter") submitTypedMove(); });
 }
 
+// Both overlay session modes ("agent" vs "pvp") share the same mic/text-entry UI —
+// dispatch to whichever backend is actually running this session.
+function submitUserMove(text) {
+  if (activeSessionMode === "agent") {
+    sendAgentMove(text);
+  } else {
+    sendMoveToVoiceBackend(text);
+  }
+}
+
+function submitControlAction(action) {
+  if (activeSessionMode === "agent") {
+    agentControlAction(action);
+  } else {
+    sendMoveToVoiceBackend(action);
+  }
+}
+
 function startVoiceCall() {
   if (isCallActive) return;
   isCallActive = true;
   isCallMuted = false;
+  activeSessionMode = "pvp";
   currentGatherAction = "/api/voice/process_move";
   pendingChoiceActive = false;
 
   const overlay = $("voice-call-overlay");
   overlay.classList.remove("hidden");
-  
+  $("agent-board-panel")?.classList.add("hidden");
+
   const personalitySelect = $("personality-select");
   currentPersonality = personalitySelect ? personalitySelect.value : "formal";
   const botName = "Thara";
@@ -3696,7 +3743,7 @@ function connectVoiceCall(botName, personality) {
     formData.append("elo", difficultySelect.value);
   }
 
-  fetch("/api/voice", {
+  fetch(apiUrl("/api/voice"), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: formData.toString()
@@ -3719,6 +3766,172 @@ function connectVoiceCall(botName, personality) {
       endVoiceCall();
     });
   });
+}
+
+// ── Agent (vs Thara) session — JSON /api/games/* API with a live board, distinct
+// from the TwiML phone-call simulation above (which PvP "accept challenge" still uses). ──
+function ensureAgentBoard() {
+  if (agentBoard) return;
+  agentBoard = Chessboard("agent-board", {
+    position: "start",
+    pieceTheme: p => "/pieces/" + p + ".svg",
+    draggable: false,
+  });
+}
+
+function renderAgentBoard(fen) {
+  if (!fen) return;
+  ensureAgentBoard();
+  agentBoard.position(fen);
+}
+
+async function startAgentSession() {
+  if (isCallActive) return;
+
+  const activePhone = localStorage.getItem("userPhone");
+  const token = localStorage.getItem("sessionToken");
+  if (!activePhone || !token) {
+    window.authRedirectView = "view-play";
+    $("auth-overlay").classList.remove("hidden");
+    return;
+  }
+
+  isCallActive = true;
+  isCallMuted = false;
+  activeSessionMode = "agent";
+  pendingChoiceActive = false;
+  currentGameId = null;
+
+  const overlay = $("voice-call-overlay");
+  overlay.classList.remove("hidden");
+  $("agent-board-panel")?.classList.remove("hidden");
+  $("call-text-fallback")?.classList.add("hidden");
+
+  const botName = "Thara";
+  $("call-avatar").textContent = "👩🏼‍💼";
+  $("call-status").textContent = `Connecting to ${botName}...`;
+  $("call-feedback").textContent = '"Setting up the board..."';
+
+  ensureAgentBoard();
+  currentCallPhone = activePhone;
+
+  try {
+    const body = {};
+    const difficultySelect = $("difficulty-select");
+    if (difficultySelect && difficultySelect.value) {
+      body.elo = parseInt(difficultySelect.value, 10);
+    }
+
+    const res = await fetch(apiUrl("/api/games/new"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Failed to start agent session");
+
+    currentGameId = data.game_id;
+    renderAgentBoard(data.fen);
+    if (agentBoard && data.player_color) agentBoard.orientation(data.player_color);
+
+    $("call-status").textContent = `Connected to ${botName}`;
+    const sayText = data.speech || `Connected to ${botName}. Your move.`;
+    speakVoice(sayText, () => {
+      startSpeechListener();
+    });
+  } catch (err) {
+    console.error("Error starting agent session:", err);
+    speakVoice("Error starting the agent. Please try again.", () => {
+      endVoiceCall();
+    });
+  }
+}
+
+async function sendAgentMove(speechResult) {
+  if (!isCallActive || activeSessionMode !== "agent" || !currentGameId) return;
+  $("call-feedback").textContent = '"Processing move..."';
+
+  try {
+    const token = localStorage.getItem("sessionToken") || "";
+    const res = await fetch(apiUrl(`/api/games/${currentGameId}/move`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ text: speechResult })
+    });
+    const data = await res.json();
+    if (data.fen) renderAgentBoard(data.fen);
+
+    if (data.status === "ambiguous") {
+      const squares = (data.candidates || []).join(", ");
+      speakVoice(`There's more than one piece that can do that. Try naming the square it's on, like ${squares}.`, () => {
+        startSpeechListener();
+      });
+      return;
+    }
+    if (data.status === "illegal") {
+      speakVoice("I didn't catch a legal move there. Please try again.", () => {
+        startSpeechListener();
+      });
+      return;
+    }
+    if (data.status === "not_your_turn") {
+      speakVoice("It's not your turn yet.", () => {
+        startSpeechListener();
+      });
+      return;
+    }
+    if (!res.ok || data.error) throw new Error(data.error || "Move failed");
+
+    const sayText = data.speech || "Move made.";
+    speakVoice(sayText, () => {
+      if (data.game_over) {
+        endVoiceCall();
+      } else {
+        startSpeechListener();
+      }
+    });
+  } catch (err) {
+    console.error("Error sending agent move:", err);
+    speakVoice("Error communicating with the agent.", () => {
+      startSpeechListener();
+    });
+  }
+}
+
+async function agentControlAction(action) {
+  if (!isCallActive || activeSessionMode !== "agent" || !currentGameId) return;
+
+  try {
+    const token = localStorage.getItem("sessionToken") || "";
+    const res = await fetch(apiUrl(`/api/games/${currentGameId}/control`), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ action })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Action failed");
+    if (data.fen) renderAgentBoard(data.fen);
+
+    const sayText = data.speech || "Done.";
+    speakVoice(sayText, () => {
+      if (data.result && data.result !== "*") {
+        endVoiceCall();
+      } else {
+        startSpeechListener();
+      }
+    });
+  } catch (err) {
+    console.error("Error sending agent control action:", err);
+  }
 }
 
 function startSpeechListener() {
@@ -3760,7 +3973,7 @@ function startSpeechListener() {
   speechRecognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
     $("call-feedback").textContent = `You said: "${transcript}"`;
-    sendMoveToVoiceBackend(transcript);
+    submitUserMove(transcript);
   };
 
   try {
@@ -3822,7 +4035,7 @@ async function triggerStockfishVoiceResponse() {
     formData.append("From", currentCallPhone);
     formData.append("elo", currentBotElo);
 
-    const res = await fetch("/api/voice", {
+    const res = await fetch(apiUrl("/api/voice"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formData.toString()
@@ -3915,6 +4128,8 @@ function endVoiceCall() {
   isCallActive = false;
   pendingChoiceActive = false;
   currentGatherAction = "/api/voice/process_move";
+  activeSessionMode = null;
+  currentGameId = null;
   if (speechRecognition) {
     try { speechRecognition.stop(); } catch(e) {}
   }
@@ -3923,6 +4138,7 @@ function endVoiceCall() {
   }
   $("voice-call-overlay").classList.add("hidden");
   $("call-text-fallback")?.classList.add("hidden");
+  $("agent-board-panel")?.classList.add("hidden");
   loadUserSavedGames();
 }
 

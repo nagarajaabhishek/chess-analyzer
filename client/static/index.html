@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Native app shell (iOS Capacitor): strip the marketing landing page down to
+    // just Play + Analyze. Runs synchronously before first paint to avoid a flash
+    // of marketing content. Capacitor's bridge injects window.Capacitor before any
+    // page script runs, so this check is safe this early.
+    if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+      document.documentElement.classList.add("native-app");
+    }
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
   <title>ChessNow — Call & Play Chess Hands-Free (Voice Hotline)</title>
@@ -186,41 +195,50 @@
   </div>
 </div>
 
-<!-- ── Voice Call Screen Overlay ── -->
+<!-- ── Voice Call / Agent Screen Overlay ── -->
 <div id="voice-call-overlay" class="voice-call-overlay hidden">
-  <div class="call-avatar-container">
-    <div class="call-avatar" id="call-avatar">👩🏼‍💼</div>
-    <div class="call-pulse-waves">
-      <div class="pulse-wave"></div>
-      <div class="pulse-wave"></div>
+  <!-- Live board panel — only populated/shown for Agent (vs Thara) sessions, since
+       PvP phone-simulation sessions have no FEN available on this side. -->
+  <div class="agent-board-panel hidden" id="agent-board-panel">
+    <div id="agent-board" class="agent-board"></div>
+    <button class="agent-board-toggle" id="btn-agent-board-toggle" aria-expanded="true">🙈 Hide board</button>
+  </div>
+
+  <div class="call-panel">
+    <div class="call-avatar-container">
+      <div class="call-avatar" id="call-avatar">👩🏼‍💼</div>
+      <div class="call-pulse-waves">
+        <div class="pulse-wave"></div>
+        <div class="pulse-wave"></div>
+      </div>
     </div>
-  </div>
-  <div class="call-details">
-    <h2 id="call-status" aria-live="polite" role="status">Dialing Coach...</h2>
-    <p id="call-subtext">Speak your moves clearly (e.g. "E4", "Knight to F3", or "E2 to E4")</p>
-    <p class="call-privacy-note">🌐 Voice calls use your browser's cloud speech recognition — unlike game analysis, this is not processed locally.</p>
-  </div>
-  <div class="call-feedback-bubble" id="call-feedback" aria-live="polite" role="status">"Waiting for speech..."</div>
+    <div class="call-details">
+      <h2 id="call-status" aria-live="polite" role="status">Connecting...</h2>
+      <p id="call-subtext">Speak your moves clearly (e.g. "E4", "Knight to F3", or "E2 to E4")</p>
+      <p class="call-privacy-note">🌐 Voice sessions use your browser's cloud speech recognition — unlike game analysis, this is not processed locally.</p>
+    </div>
+    <div class="call-feedback-bubble" id="call-feedback" aria-live="polite" role="status">"Waiting for speech..."</div>
 
-  <!-- On-screen equivalents of the phone-keypad shortcuts (1=resign, 2=draw, 3=takeback) —
-       a browser/mobile caller has no keypad to press, so give them buttons instead. -->
-  <div class="call-action-row" id="call-action-buttons">
-    <button class="call-action-btn" id="btn-call-resign">Resign</button>
-    <button class="call-action-btn" id="btn-call-draw">Draw</button>
-    <button class="call-action-btn" id="btn-call-takeback">Takeback</button>
-  </div>
+    <!-- On-screen equivalents of the phone-keypad shortcuts (1=resign, 2=draw, 3=takeback) —
+         a browser/mobile caller has no keypad to press, so give them buttons instead. -->
+    <div class="call-action-row" id="call-action-buttons">
+      <button class="call-action-btn" id="btn-call-resign">Resign</button>
+      <button class="call-action-btn" id="btn-call-draw">Draw</button>
+      <button class="call-action-btn" id="btn-call-takeback">Takeback</button>
+    </div>
 
-  <!-- Fallback move entry for browsers/devices without SpeechRecognition (notably iOS/Safari,
-       which WebKit has never implemented) — auto-shown in that case, always available otherwise. -->
-  <div class="call-text-fallback hidden" id="call-text-fallback">
-    <label for="call-text-input" class="sr-only">Type your move</label>
-    <input type="text" id="call-text-input" placeholder="Type your move, e.g. Nf3" autocomplete="off"/>
-    <button id="btn-call-text-send">Send</button>
-  </div>
+    <!-- Fallback move entry for browsers/devices without SpeechRecognition (notably iOS/Safari,
+         which WebKit has never implemented) — auto-shown in that case, always available otherwise. -->
+    <div class="call-text-fallback hidden" id="call-text-fallback">
+      <label for="call-text-input" class="sr-only">Type your move</label>
+      <input type="text" id="call-text-input" placeholder="Type your move, e.g. Nf3" autocomplete="off"/>
+      <button id="btn-call-text-send">Send</button>
+    </div>
 
-  <div class="call-controls">
-    <button class="btn-mute" id="btn-call-mute" title="Toggle Mute" aria-label="Mute Microphone">🎙️</button>
-    <button class="btn-hangup" id="btn-call-hangup" title="Hang Up" aria-label="Hang Up">📞</button>
+    <div class="call-controls">
+      <button class="btn-mute" id="btn-call-mute" title="Toggle Mute" aria-label="Mute Microphone">🎙️</button>
+      <button class="btn-hangup" id="btn-call-hangup" title="End Session" aria-label="End Session">✖</button>
+    </div>
   </div>
 </div>
 
@@ -274,11 +292,18 @@
       </div>
       
       <p class="hero-sub" style="margin-top: 24px;">Play hands-free chess against our AI companion Thara or challenge friends over a phone call.</p>
-      
+
+      <!-- App-only intro (iOS Capacitor): shown instead of the marketing copy above -->
+      <div class="native-app-intro">
+        <h1 class="hero-title">ChessNow</h1>
+        <p class="hero-sub">Play hands-free chess against Thara, or analyze your games.</p>
+      </div>
+
       <!-- Action Buttons Row -->
       <div class="hero-buttons">
         <button id="btn-home-play" class="btn btn-primary btn-play-call">
-          <span class="play-icon">🌐</span> Launch Web Lobby
+          <span class="play-icon native-app-hide">🌐</span><span class="play-icon native-app-show">🎙️</span>
+          <span class="native-app-hide">Launch Web Lobby</span><span class="native-app-show">Play Voice Game</span>
         </button>
         <button id="btn-scroll-analysis" class="btn btn-secondary">
           <span>🔍 Analyze Games</span> <span class="arrow-down">↓</span>
@@ -505,14 +530,9 @@
 
   <div class="play-section">
     <div class="bot-selector-card">
-      <h3>🤖 Call Thara</h3>
-      <p>Thara is your chess assistant and companion. She dynamically matches your Elo rating (±20 Elo) for a formal, balanced game.</p>
+      <h3>🤖 Play the Agent</h3>
+      <p>Thara is your in-app voice agent — speak your moves and watch the board update live. She dynamically matches your Elo rating (±20 Elo) for a balanced game.</p>
       <div class="bot-selector-row">
-        <label for="personality-select" class="sr-only">Thara's commentary style</label>
-        <select id="personality-select" class="bot-select-dropdown" style="margin-right: 10px;">
-          <option value="formal" selected>Formal Coach 👩🏼‍💼</option>
-          <option value="minimal">Minimalist (Moves Only) 🔇</option>
-        </select>
         <label for="difficulty-select" class="sr-only">Thara's strength</label>
         <select id="difficulty-select" class="bot-select-dropdown" style="margin-right: 10px;" title="Thara's strength">
           <option value="" selected>Match my rating ⚖️</option>
@@ -521,7 +541,7 @@
           <option value="1600">Club (1600) 🏛️</option>
           <option value="2000">Expert (2000) 🔥</option>
         </select>
-        <button class="btn btn-primary btn-call" id="btn-games-call" title="Start a voice chess game">📞 Call Thara</button>
+        <button class="btn btn-primary btn-call" id="btn-games-call" title="Start a voice game with the in-app agent">🤖 Start Agent</button>
       </div>
     </div>
 
@@ -729,7 +749,7 @@
         <button class="ctrl-btn" id="btn-next"  title="Next">▶</button>
         <button class="ctrl-btn" id="btn-last"  title="Last move">⏭</button>
         <button class="ctrl-btn" id="btn-flip"  title="Flip board">⟳</button>
-        <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">📞</button>
+        <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Play the Agent (uses cloud speech recognition, not local)">🤖</button>
       </div>
       <button id="btn-main-line" class="main-line-btn hidden" title="Return to main game line">↩ Back to main line</button>
 
@@ -747,9 +767,9 @@
           <span class="mobile-action-icon">↻</span>
           <span class="mobile-action-text">Retry</span>
         </button>
-        <button class="mobile-action-btn btn-call" id="btn-mobile-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">
-          <span class="mobile-action-icon">📞</span>
-          <span class="mobile-action-text">Call</span>
+        <button class="mobile-action-btn btn-call" id="btn-mobile-call" title="Play the Agent (uses cloud speech recognition, not local)">
+          <span class="mobile-action-icon">🤖</span>
+          <span class="mobile-action-text">Agent</span>
         </button>
         <button class="btn-mobile-primary-next" id="btn-mobile-next-key">
           Next
