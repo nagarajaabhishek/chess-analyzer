@@ -25,6 +25,7 @@ const state = {
   currentVariationPath: [],
   lastRenderedPathStr: null,
   showBestArrow: false,
+  selectedSquare: null, // square currently showing legal-move dots, e.g. "e4"
 };
 
 let useLocalWasm = false;
@@ -696,6 +697,12 @@ function initBoard(playerIsWhite) {
   const evalWrap = document.querySelector('.eval-bar-wrap');
   if (evalWrap) evalWrap.style.height = size + 'px';
 
+  // Click-to-move: tap a piece to see legal squares, tap again to play — rebind since
+  // chessboard.js replaces the square/piece DOM nodes inside #board on every init.
+  const boardEl = document.getElementById("board");
+  boardEl.removeEventListener("click", handleBoardClick);
+  boardEl.addEventListener("click", handleBoardClick);
+
   // Enable touch dragging on mobile devices
   enableMobilePieceDragging();
 }
@@ -731,6 +738,10 @@ function enableMobilePieceDragging() {
     
     touch.target.dispatchEvent(simulatedEvent);
     e.preventDefault();
+
+    // preventDefault() above suppresses the browser's synthetic "click" after a tap,
+    // so tap-to-select/tap-to-move needs its own hook here instead of relying on "click".
+    if (e.type === "touchend") handleBoardClick({ target: touch.target });
   };
 
   boardEl.addEventListener("touchstart", touchHandler, { passive: false });
@@ -754,12 +765,18 @@ function handleDragStart(source, piece) {
   if (!state.chess) return false;
   if (state.chess.turn() === 'w' && piece.startsWith('b')) return false;
   if (state.chess.turn() === 'b' && piece.startsWith('w')) return false;
+  showLegalMoves(source);
   return true;
 }
 
 // Validate drop — snap back if illegal
 function handleDrop(source, target) {
   if (!state.chess) return 'snapback';
+
+  // A same-square "drop" is really just a press-and-release on the piece (a tap, or a
+  // click with no mouse movement) — keep its legal-move dots showing instead of wiping
+  // them, so a second tap/click on a highlighted square can complete the move.
+  if (source === target) return 'snapback';
 
   // Detect promotion before committing so the user can pick the piece instead of
   // always auto-queening — underpromotions are rare but real (e.g. stalemate tricks).
@@ -773,7 +790,74 @@ function handleDrop(source, target) {
   }
 
   const move = state.chess.move({ from: source, to: target, promotion });
+  clearLegalMoveHighlights();
   return move ? undefined : 'snapback';
+}
+
+// Returns the algebraic square (e.g. "e4") for a chessboard.js square element, or null
+function squareFromElement(el) {
+  const match = [...el.classList].find(c => /^square-[a-h][1-8]$/.test(c));
+  return match ? match.replace("square-", "") : null;
+}
+
+function clearLegalMoveHighlights() {
+  document.querySelectorAll(".legal-move-dot, .legal-move-capture, .legal-move-selected")
+    .forEach(el => el.classList.remove("legal-move-dot", "legal-move-capture", "legal-move-selected"));
+  state.selectedSquare = null;
+}
+
+// Highlights the legal destination squares for the piece on `square`
+function showLegalMoves(square) {
+  clearLegalMoveHighlights();
+  if (!state.chess) return;
+  const moves = state.chess.moves({ square, verbose: true });
+  if (!moves.length) return;
+
+  state.selectedSquare = square;
+  const fromEl = document.getElementsByClassName(`square-${square}`)[0];
+  if (fromEl) fromEl.classList.add("legal-move-selected");
+
+  moves.forEach(m => {
+    const toEl = document.getElementsByClassName(`square-${m.to}`)[0];
+    if (!toEl) return;
+    toEl.classList.add(m.flags.includes("c") || m.flags.includes("e") ? "legal-move-capture" : "legal-move-dot");
+  });
+}
+
+// Click-to-move: tap a piece to see its legal moves, tap a highlighted square to play it
+function handleBoardClick(e) {
+  if (!state.chess) return;
+  const squareEl = e.target.closest('[class*="square-"]');
+  const square = squareEl ? squareFromElement(squareEl) : null;
+  if (!square) return;
+
+  // Tapped a highlighted destination while a piece is selected — play the move
+  if (state.selectedSquare && state.selectedSquare !== square &&
+      (squareEl.classList.contains("legal-move-dot") || squareEl.classList.contains("legal-move-capture"))) {
+    const source = state.selectedSquare;
+    const candidateMoves = state.chess.moves({ square: source, verbose: true });
+    const isPromotion = candidateMoves.some(m => m.to === square && m.flags.includes("p"));
+    let promotion = "q";
+    if (isPromotion) {
+      const choice = (window.prompt("Promote to: Q, R, B, or N?", "Q") || "Q").trim().toLowerCase();
+      promotion = ["q", "r", "b", "n"].includes(choice) ? choice : "q";
+    }
+    const move = state.chess.move({ from: source, to: square, promotion });
+    clearLegalMoveHighlights();
+    if (move) handleSnapEnd();
+    return;
+  }
+
+  // Already-selected square — leave its dots showing (mousedown/touchstart just selected it)
+  if (state.selectedSquare === square) return;
+
+  const piece = state.chess.get(square);
+  const isOwnPiece = piece && piece.color === state.chess.turn();
+  if (isOwnPiece) {
+    showLegalMoves(square); // switch selection to this piece
+  } else {
+    clearLegalMoveHighlights(); // tapped an empty/non-legal square — deselect
+  }
 }
 
 // Returns the currently active moves array walking down the variation path
@@ -943,6 +1027,7 @@ function updateCoachBubble() {
 }
 
 function goToMove(idx) {
+  clearLegalMoveHighlights();
   const moves = getActiveMoves();
   state.moveIndex = Math.max(-1, Math.min(idx, moves.length - 1));
 

@@ -157,7 +157,7 @@ body {
 #view-analysis {
   height: 100vh;
   overflow: hidden;
-  padding-top: var(--safe-top); /* Board starts exactly from safe area top */
+  padding-top: calc(70px + var(--safe-top)); /* Clears the fixed header on desktop */
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1149,7 +1149,7 @@ body {
   justify-content: center; /* Center horizontally */
   gap: 32px;               /* Clean spacing between board and sidebar */
   align-items: stretch;    /* Stretch to match height */
-  height: calc(100vh - 56px - 20px); /* Fill viewport height below header */
+  height: 100%;            /* Fill #view-analysis's content box (already clears the header) */
   overflow: hidden;        /* Prevent layout overflow scrolling */
 }
 
@@ -1288,6 +1288,31 @@ body {
 
 .hl-blunder-from    { background: rgba(239, 68, 68, 0.25) !important; }
 .hl-blunder-to      { background: rgba(239, 68, 68, 0.50) !important; }
+
+/* Legal-move indicators (tap-to-select on the board) */
+#board .piece-417db { position: relative; z-index: 2; }
+.legal-move-selected { box-shadow: inset 0 0 0 999px rgba(255, 214, 92, 0.35) !important; }
+.legal-move-dot::after,
+.legal-move-capture::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 50%;
+}
+.legal-move-dot::after {
+  top: 50%;
+  left: 50%;
+  width: 28%;
+  height: 28%;
+  background: rgba(20, 16, 12, 0.35);
+  transform: translate(-50%, -50%);
+}
+.legal-move-capture::after {
+  inset: 5%;
+  border: 4px solid rgba(20, 16, 12, 0.35);
+  box-sizing: border-box;
+}
 
 /* Controls */
 .board-controls {
