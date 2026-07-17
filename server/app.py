@@ -1798,6 +1798,317 @@ def find_active_live_game(phone_clean):
     return game
 
 
+def _get_owned_live_bot_game(game_id, phone_clean):
+    """Fetch a bot game the given phone owns (any result), or None."""
+    game = db.session.get(Game, game_id)
+    if not game or game.source != "voice_bot":
+        return None
+    if phone_clean not in (game.user_phone, game.white_phone, game.black_phone):
+        return None
+    return game
+
+
+def _play_bot_move_if_due(game, board):
+    """If it's the bot's turn in a live bot game, computes and applies its move
+    synchronously (same engine.play pattern as the phone voice bot) and persists it.
+    Sets game.result if the bot's move ends the game. Returns the bot's SAN, or None
+    if it wasn't the bot's turn or the engine is unavailable."""
+    bot_color = chess.WHITE if (game.player_color or "white") == "black" else chess.BLACK
+    if game.source != "voice_bot" or board.turn != bot_color:
+        return None
+    sf_path = find_stockfish()
+    if not sf_path:
+        return None
+    try:
+        with chess.engine.SimpleEngine.popen_uci(sf_path) as engine:
+            engine_elo = max(1320, min(3190, game.bot_elo or 1500))
+            try:
+                engine.configure({"UCI_LimitStrength": True})
+            except Exception as e:
+                print(f"⚠️ Stockfish limit strength config warning: {e}")
+            try:
+                engine.configure({"UCI_Elo": engine_elo})
+            except Exception as e:
+                print(f"⚠️ Stockfish Elo config warning: {e}")
+            play_res = engine.play(board, chess.engine.Limit(time=0.15))
+            ai_move = play_res.move
+            bot_san = board.san(ai_move)
+            board.push(ai_move)
+            _save_pgn(game, board)
+            if board.is_game_over():
+                game.result = board.result()
+                db.session.commit()
+            return bot_san
+    except Exception as e:
+        print(f"Stockfish engine error: {e}")
+        return None
+
+
+# ── Watch / JSON Game API (bot games only) ──
+
+@app.route("/api/games/new", methods=["POST"])
+@token_required
+def create_watch_game():
+    try:
+        phone_clean = request.phone_clean
+        data = request.json or {}
+        elo_raw = data.get("elo")
+
+        user = db.session.get(User, phone_clean)
+        if not user:
+            user = User(phone_number=phone_clean)
+            db.session.add(user)
+            db.session.commit()
+
+        existing = find_active_live_game(phone_clean)
+        if existing:
+            existing.result = "aborted"
+            db.session.commit()
+
+        if isinstance(elo_raw, int):
+            bot_elo = elo_raw
+        else:
+            player_rating = user.elo or 1000
+            bot_elo = player_rating + random.randint(-20, 20)
+
+        bot_name = f"Thara ({bot_elo})"
+        user_color = random.choice(["white", "black"])
+        if user_color == "white":
+            white_phone, black_phone = phone_clean, None
+            white_player, black_player = "You", bot_name
+        else:
+            white_phone, black_phone = None, phone_clean
+            white_player, black_player = bot_name, "You"
+
+        game = Game(
+            id=str(uuid.uuid4()),
+            user_phone=phone_clean,
+            white_phone=white_phone,
+            black_phone=black_phone,
+            source="voice_bot",
+            bot_elo=bot_elo,
+            commentary_style="formal",
+            white_player=white_player,
+            black_player=black_player,
+            pgn="",
+            result="*",
+            player_color=user_color,
+            last_activity_at=datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        db.session.add(game)
+        db.session.commit()
+
+        board = chess.Board()
+        bot_san = _play_bot_move_if_due(game, board)
+
+        return jsonify({
+            "game_id": game.id,
+            "fen": board.fen(),
+            "player_color": user_color,
+            "bot_elo": bot_elo,
+            "white_player": white_player,
+            "black_player": black_player,
+            "bot_san": bot_san,
+            "speech": f"I play {_san_to_speech(bot_san)}." if bot_san else None,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/state", methods=["GET"])
+@token_required
+def get_watch_game_state(game_id):
+    try:
+        game = _get_owned_live_bot_game(game_id, request.phone_clean)
+        if not game:
+            return jsonify({"error": "Game not found"}), 404
+        board = _board_from_pgn(game.pgn)
+        last_move_san = None
+        if board.move_stack:
+            temp = board.copy()
+            last = temp.pop()
+            last_move_san = temp.san(last)
+        return jsonify({
+            "game_id": game.id,
+            "fen": board.fen(),
+            "pgn": game.pgn,
+            "turn": "white" if board.turn == chess.WHITE else "black",
+            "result": game.result,
+            "player_color": game.player_color,
+            "hints_used": game.hints_used or 0,
+            "hints_left": max(0, 3 - (game.hints_used or 0)),
+            "last_move_san": last_move_san,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/move", methods=["POST"])
+@token_required
+def play_watch_move(game_id):
+    try:
+        game = _get_owned_live_bot_game(game_id, request.phone_clean)
+        if not game:
+            return jsonify({"error": "Game not found"}), 404
+        if game.result != "*":
+            return jsonify({"error": "Game is over"}), 400
+
+        data = request.json or {}
+        text = (data.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "No move text provided"}), 400
+
+        board = _board_from_pgn(game.pgn)
+
+        turn_phone = game.white_phone if board.turn == chess.WHITE else game.black_phone
+        if turn_phone != request.phone_clean:
+            return jsonify({"status": "not_your_turn", "fen": board.fen()})
+
+        match = _normalize_and_match_move(board, text)
+
+        if match["status"] == "promotion":
+            # v1 has no promotion picker on Watch — always promote to queen.
+            move = next((m for m in match["candidates"] if m.promotion == chess.QUEEN), match["candidates"][0])
+        elif match["status"] in ("matched", "single_candidate"):
+            move = match["move"]
+        elif match["status"] == "ambiguous":
+            return jsonify({
+                "status": "ambiguous",
+                "candidates": [chess.square_name(m.from_square) for m in match["candidates"]],
+            })
+        else:
+            return jsonify({"status": "illegal"})
+
+        played_san = board.san(move)
+        played_uci = move.uci()
+        board.push(move)
+        _save_pgn(game, board)
+
+        if board.is_game_over():
+            game.result = board.result()
+            db.session.commit()
+            elo_msg = _update_game_elo(game, game.result)
+            return jsonify({
+                "status": "ok",
+                "played_san": played_san,
+                "played_uci": played_uci,
+                "fen": board.fen(),
+                "result": game.result,
+                "game_over": True,
+                "speech": f"You played {_san_to_speech(played_san)}. Game over.{elo_msg}",
+                "hints_left": max(0, 3 - (game.hints_used or 0)),
+            })
+
+        bot_san = _play_bot_move_if_due(game, board)
+        bot_uci = board.peek().uci() if bot_san else None
+
+        speech = f"You played {_san_to_speech(played_san)}."
+        game_over = game.result != "*"
+        if bot_san:
+            speech += f" I play {_san_to_speech(bot_san)}."
+            if board.is_check():
+                speech += ", check"
+        if game_over:
+            elo_msg = _update_game_elo(game, game.result)
+            speech += f" Game over.{elo_msg}"
+
+        return jsonify({
+            "status": "ok",
+            "played_san": played_san,
+            "played_uci": played_uci,
+            "bot_san": bot_san,
+            "bot_uci": bot_uci,
+            "fen": board.fen(),
+            "result": game.result,
+            "game_over": game_over,
+            "speech": speech,
+            "hints_left": max(0, 3 - (game.hints_used or 0)),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/control", methods=["POST"])
+@token_required
+def control_watch_game(game_id):
+    try:
+        game = _get_owned_live_bot_game(game_id, request.phone_clean)
+        if not game:
+            return jsonify({"error": "Game not found"}), 404
+        if game.result != "*":
+            return jsonify({"error": "Game is over"}), 400
+
+        data = request.json or {}
+        action = (data.get("action") or "").strip().lower()
+        phone_clean = request.phone_clean
+        board = _board_from_pgn(game.pgn)
+
+        if action == "resign":
+            game.result = "0-1" if phone_clean == game.white_phone else "1-0"
+            db.session.commit()
+            elo_msg = _update_game_elo(game, game.result)
+            return jsonify({"status": "ok", "result": game.result, "speech": f"You resigned.{elo_msg}"})
+
+        if action == "draw":
+            game.result = "1/2-1/2"
+            db.session.commit()
+            elo_msg = _update_game_elo(game, game.result)
+            return jsonify({"status": "ok", "result": game.result, "speech": f"Draw agreed.{elo_msg}"})
+
+        if action == "takeback":
+            plies_to_undo = min(2, len(board.move_stack))
+            for _ in range(plies_to_undo):
+                board.pop()
+            _save_pgn(game, board)
+            return jsonify({"status": "ok", "fen": board.fen(), "speech": "Move taken back."})
+
+        return jsonify({"error": "Unknown action"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/hint", methods=["POST"])
+@token_required
+def hint_watch_game(game_id):
+    try:
+        game = _get_owned_live_bot_game(game_id, request.phone_clean)
+        if not game:
+            return jsonify({"error": "Game not found"}), 404
+        if game.result != "*":
+            return jsonify({"error": "Game is over"}), 400
+        if (game.hints_used or 0) >= 3:
+            return jsonify({"status": "no_hints_left", "hints_left": 0})
+
+        board = _board_from_pgn(game.pgn)
+        sf_path = find_stockfish()
+        if not sf_path:
+            return jsonify({"error": "Engine unavailable"}), 503
+
+        hint_san = None
+        try:
+            with chess.engine.SimpleEngine.popen_uci(sf_path) as engine:
+                hint_res = engine.play(board, chess.engine.Limit(time=0.2))
+                if hint_res.move:
+                    hint_san = board.san(hint_res.move)
+        except Exception as e:
+            print(f"Hint engine error: {e}")
+
+        if not hint_san:
+            return jsonify({"error": "Could not calculate a hint"}), 503
+
+        game.hints_used = (game.hints_used or 0) + 1
+        db.session.commit()
+        hints_left = 3 - game.hints_used
+
+        return jsonify({
+            "hint_san": hint_san,
+            "speech": f"I would consider {_san_to_speech(hint_san)}. You have {hints_left} hint{'s' if hints_left != 1 else ''} left.",
+            "hints_left": hints_left,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Twilio Telephony Webhook ──
 
 @app.route("/api/voice/challenge", methods=["POST"])
@@ -2724,6 +3035,105 @@ def _parse_piece_and_target(speech_clean):
     return piece, target_sq
 
 
+def _speech_raw_clean(speech):
+    return speech.lower().replace(".", "").replace(",", "").replace("-", "").replace(" ", "")
+
+
+def _normalize_and_match_move(board, speech):
+    """Pure move parser: normalizes spoken/typed text and matches it against `board`'s
+    legal moves. Shared by the Twilio voice-move handler and the JSON games API so
+    there's one place that knows how to read "knight to f3" et al.
+
+    Returns a dict with "status" one of:
+      "matched"          -> {"move": chess.Move}                  single unambiguous match
+      "promotion"        -> {"candidates": [chess.Move, ...]}     same from/to, one per promotion piece
+      "ambiguous"        -> {"candidates": [chess.Move, ...]}     same piece+target, different origin squares
+      "single_candidate" -> {"move": chess.Move}                  one fallback piece+target guess, unconfirmed
+      "none"             -> {}
+    """
+    raw_clean = _speech_raw_clean(speech)
+
+    speech_clean = raw_clean.replace("alpha", "a").replace("bravo", "b").replace("charlie", "c")
+    speech_clean = speech_clean.replace("delta", "d").replace("echo", "e").replace("foxtrot", "f")
+    speech_clean = speech_clean.replace("golf", "g").replace("hotel", "h")
+
+    speech_clean = speech_clean.replace("pawn", "").replace("move", "").replace("play", "")
+    speech_clean = speech_clean.replace("knight", "n").replace("night", "n")
+    speech_clean = speech_clean.replace("bishop", "b").replace("rook", "r")
+    speech_clean = speech_clean.replace("queen", "q").replace("king", "k")
+    speech_clean = speech_clean.replace("captures", "x").replace("capture", "x")
+    speech_clean = speech_clean.replace("takes", "x").replace("take", "x")
+    speech_clean = speech_clean.replace("to", "")
+
+    speech_clean = speech_clean.replace("seefour", "c4").replace("seefive", "c5").replace("see4", "c4").replace("see5", "c5")
+    speech_clean = speech_clean.replace("before", "b4").replace("befour", "b4")
+    speech_clean = speech_clean.replace("d.four", "d4").replace("deefour", "d4").replace("deefive", "d5")
+    speech_clean = speech_clean.replace("e.four", "e4").replace("efour", "e4").replace("efive", "e5")
+    speech_clean = speech_clean.replace("eight", "a8").replace("eighty", "a8").replace("ate", "a8")
+    speech_clean = speech_clean.replace("f.four", "f4").replace("ffour", "f4").replace("ffive", "f5")
+    speech_clean = speech_clean.replace("g.four", "g4").replace("gfour", "g4")
+    speech_clean = speech_clean.replace("h.four", "h4").replace("hfour", "h4")
+
+    matched_move = None
+
+    if "castle" in raw_clean or raw_clean in ("oo", "ooo", "o-o", "o-o-o"):
+        want_queenside = "queenside" in raw_clean or "long" in raw_clean or raw_clean in ("ooo", "o-o-o")
+        for m in board.legal_moves:
+            if want_queenside and board.is_queenside_castling(m):
+                matched_move = m
+                break
+            if not want_queenside and board.is_kingside_castling(m):
+                matched_move = m
+                break
+
+    if not matched_move:
+        loose_clean = re.sub(r'^([a-h])[1-8]x([a-h][1-8]=?[qrbn]?)$', r'\1x\2', speech_clean)
+        for m in board.legal_moves:
+            san = board.san(m)
+            san_clean = san.lower().replace("x", "").replace("+", "").replace("#", "").replace("=", "")
+            san_lower = san.lower()
+            if speech_clean in (san_clean, san_lower) or loose_clean in (san_clean, san_lower):
+                matched_move = m
+                break
+
+    if not matched_move:
+        for m in board.legal_moves:
+            uci = m.uci()
+            if speech_clean == uci or speech_clean == uci[:4]:
+                matched_move = m
+                break
+
+    if matched_move:
+        return {"status": "matched", "move": matched_move}
+
+    promotion_candidates = []
+    for m in board.legal_moves:
+        if m.promotion is not None:
+            uci = m.uci()
+            from_sq = chess.square_name(m.from_square)
+            to_sq = chess.square_name(m.to_square)
+            if speech_clean in (to_sq, f"{from_sq}{to_sq}", uci[:4]):
+                promotion_candidates.append(m)
+    if promotion_candidates:
+        return {"status": "promotion", "candidates": promotion_candidates}
+
+    piece, target_sq = _parse_piece_and_target(speech_clean)
+    if piece and target_sq:
+        matching_moves = []
+        for m in board.legal_moves:
+            piece_at = board.piece_at(m.from_square)
+            if piece_at and piece_at.piece_type == piece:
+                dest_sq = chess.square_name(m.to_square)
+                if dest_sq == target_sq:
+                    matching_moves.append(m)
+        if len(matching_moves) > 1:
+            return {"status": "ambiguous", "candidates": matching_moves}
+        elif len(matching_moves) == 1:
+            return {"status": "single_candidate", "move": matching_moves[0]}
+
+    return {"status": "none"}
+
+
 @app.route("/api/voice/calibrate", methods=["GET", "POST"])
 @twilio_webhook
 def voice_calibrate():
@@ -3037,113 +3447,68 @@ def process_voice_move():
             db.session.commit()
             return make_twiml_response("<Redirect>/api/voice?msg=Move taken back.</Redirect>")
 
-        matched_move = None
+        match = _normalize_and_match_move(board, speech)
 
-        if "castle" in raw_clean or raw_clean in ("oo", "ooo", "o-o", "o-o-o"):
-            want_queenside = "queenside" in raw_clean or "long" in raw_clean or raw_clean in ("ooo", "o-o-o")
-            for m in board.legal_moves:
-                if want_queenside and board.is_queenside_castling(m):
-                    matched_move = m
-                    break
-                if not want_queenside and board.is_kingside_castling(m):
-                    matched_move = m
-                    break
+        if match["status"] == "promotion":
+            promo_m = match["candidates"][0]
+            game.pending_promotion_uci = promo_m.uci()[:4]
+            db.session.commit()
 
-        if not matched_move:
-            loose_clean = re.sub(r'^([a-h])[1-8]x([a-h][1-8]=?[qrbn]?)$', r'\1x\2', speech_clean)
-            for m in board.legal_moves:
-                san = board.san(m)
-                san_clean = san.lower().replace("x", "").replace("+", "").replace("#", "").replace("=", "")
-                san_lower = san.lower()
-                if speech_clean in (san_clean, san_lower) or loose_clean in (san_clean, san_lower):
-                    matched_move = m
-                    break
+            twiml = """
+            <Say>Your pawn reached the eighth rank. Which piece would you like? Say queen, rook, bishop, or knight.</Say>
+            <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_promotion" timeout="5" speechTimeout="auto">
+                <Say>Say queen, rook, bishop, or knight. Or press 1 for queen, 2 for rook, 3 for bishop, 4 for knight.</Say>
+            </Gather>
+            <Redirect>/api/voice</Redirect>
+            """
+            return make_twiml_response(twiml)
 
-        if not matched_move:
-            for m in board.legal_moves:
-                uci = m.uci()
-                if speech_clean == uci or speech_clean == uci[:4]:
-                    matched_move = m
-                    break
+        if match["status"] == "ambiguous":
+            matching_moves = match["candidates"]
+            piece = board.piece_at(matching_moves[0].from_square).piece_type
+            game.pending_ambiguous_moves = json.dumps([m.uci() for m in matching_moves])
+            db.session.commit()
 
-        # Check for Pawn Promotion candidate (if no move matched yet)
-        if not matched_move:
-            promotion_candidates = []
-            for m in board.legal_moves:
-                if m.promotion is not None:
-                    uci = m.uci()
-                    from_sq = chess.square_name(m.from_square)
-                    to_sq = chess.square_name(m.to_square)
-                    if speech_clean in (to_sq, f"{from_sq}{to_sq}", uci[:4]):
-                        promotion_candidates.append(m)
-            
-            if len(promotion_candidates) > 0:
-                promo_m = promotion_candidates[0]
-                game.pending_promotion_uci = promo_m.uci()[:4]
-                db.session.commit()
-                
-                twiml = """
-                <Say>Your pawn reached the eighth rank. Which piece would you like? Say queen, rook, bishop, or knight.</Say>
-                <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_promotion" timeout="5" speechTimeout="auto">
-                    <Say>Say queen, rook, bishop, or knight. Or press 1 for queen, 2 for rook, 3 for bishop, 4 for knight.</Say>
-                </Gather>
-                <Redirect>/api/voice</Redirect>
-                """
-                return make_twiml_response(twiml)
+            sq_names = [chess.square_name(m.from_square) for m in matching_moves]
+            sq_speech = [f"{sq[0]} {sq[1]}" for sq in sq_names]
 
-        # Check for Ambiguous Moves (if no move matched yet)
-        if not matched_move:
-            piece, target_sq = _parse_piece_and_target(speech_clean)
-            if piece and target_sq:
-                matching_moves = []
-                for m in board.legal_moves:
-                    piece_at = board.piece_at(m.from_square)
-                    if piece_at and piece_at.piece_type == piece:
-                        dest_sq = chess.square_name(m.to_square)
-                        if dest_sq == target_sq:
-                            matching_moves.append(m)
-                
-                if len(matching_moves) > 1:
-                    game.pending_ambiguous_moves = json.dumps([m.uci() for m in matching_moves])
-                    db.session.commit()
-                    
-                    sq_names = [chess.square_name(m.from_square) for m in matching_moves]
-                    sq_speech = [f"{sq[0]} {sq[1]}" for sq in sq_names]
-                    
-                    piece_names = {
-                        chess.KNIGHT: "knight",
-                        chess.BISHOP: "bishop",
-                        chess.ROOK: "rook",
-                        chess.QUEEN: "queen",
-                        chess.KING: "king",
-                        chess.PAWN: "pawn"
-                    }
-                    piece_name = piece_names[piece]
-                    choices_str = " or the one on ".join(sq_speech)
-                    
-                    twiml = f"""
-                    <Say>Which {_xml_escape(piece_name)}? The one on {_xml_escape(choices_str)}?</Say>
-                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto" hints="{CHESS_VOCABULARY_HINTS}">
-                        <Say>Say the starting square, like {_xml_escape(sq_names[0])} or {_xml_escape(sq_names[1])}.</Say>
-                    </Gather>
-                    <Redirect>/api/voice</Redirect>
-                    """
-                    return make_twiml_response(twiml)
-                elif len(matching_moves) == 1:
-                    candidate_move = matching_moves[0]
-                    san = board.san(candidate_move)
-                    game.pending_confirmation_uci = candidate_move.uci()
-                    db.session.commit()
-                    _bump_call_stats(confirms=1)
-                    
-                    twiml = f"""
-                    <Say>I heard {_xml_escape(_san_to_speech(san))}. Press 1 or say yes to play it, or say no to try again.</Say>
-                    <Gather input="dtmf speech" numDigits="1" action="/api/voice/confirm_move" timeout="5" speechTimeout="auto" hints="yes, no, play, cancel, try again">
-                        <Say>Press 1 or say yes to play it, or say no to try again.</Say>
-                    </Gather>
-                    <Redirect>/api/voice</Redirect>
-                    """
-                    return make_twiml_response(twiml)
+            piece_names = {
+                chess.KNIGHT: "knight",
+                chess.BISHOP: "bishop",
+                chess.ROOK: "rook",
+                chess.QUEEN: "queen",
+                chess.KING: "king",
+                chess.PAWN: "pawn"
+            }
+            piece_name = piece_names[piece]
+            choices_str = " or the one on ".join(sq_speech)
+
+            twiml = f"""
+            <Say>Which {_xml_escape(piece_name)}? The one on {_xml_escape(choices_str)}?</Say>
+            <Gather input="dtmf speech" numDigits="1" action="/api/voice/process_move" timeout="5" speechTimeout="auto" hints="{CHESS_VOCABULARY_HINTS}">
+                <Say>Say the starting square, like {_xml_escape(sq_names[0])} or {_xml_escape(sq_names[1])}.</Say>
+            </Gather>
+            <Redirect>/api/voice</Redirect>
+            """
+            return make_twiml_response(twiml)
+
+        if match["status"] == "single_candidate":
+            candidate_move = match["move"]
+            san = board.san(candidate_move)
+            game.pending_confirmation_uci = candidate_move.uci()
+            db.session.commit()
+            _bump_call_stats(confirms=1)
+
+            twiml = f"""
+            <Say>I heard {_xml_escape(_san_to_speech(san))}. Press 1 or say yes to play it, or say no to try again.</Say>
+            <Gather input="dtmf speech" numDigits="1" action="/api/voice/confirm_move" timeout="5" speechTimeout="auto" hints="yes, no, play, cancel, try again">
+                <Say>Press 1 or say yes to play it, or say no to try again.</Say>
+            </Gather>
+            <Redirect>/api/voice</Redirect>
+            """
+            return make_twiml_response(twiml)
+
+        matched_move = match["move"] if match["status"] == "matched" else None
 
         if matched_move:
             played_san = board.san(matched_move)
