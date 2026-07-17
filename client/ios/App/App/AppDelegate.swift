@@ -5,15 +5,19 @@ import Capacitor
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    private var watchRelayTimer: Timer?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
+        WatchSessionRelay.shared.activate()
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
         // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
         // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+        watchRelayTimer?.invalidate()
+        watchRelayTimer = nil
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
@@ -27,6 +31,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        relaySessionTokenToWatch()
+        watchRelayTimer?.invalidate()
+        // The web client's login flow writes to localStorage with no native hook to observe it,
+        // so we poll while foregrounded — cheap (a single JS eval) and stops the moment we background.
+        watchRelayTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.relaySessionTokenToWatch()
+        }
+    }
+
+    /// Reads the same sessionToken/userPhone the web client already stores in localStorage
+    /// (see client/static/app.js) and forwards them to the paired Watch app, so the Watch
+    /// never needs its own login UI.
+    private func relaySessionTokenToWatch() {
+        guard let bridgeVC = window?.rootViewController as? CAPBridgeViewController,
+              let webView = bridgeVC.bridge?.webView else { return }
+        webView.evaluateJavaScript(
+            "({phone: localStorage.getItem('userPhone'), token: localStorage.getItem('sessionToken')})"
+        ) { result, _ in
+            guard let dict = result as? [String: Any] else { return }
+            WatchSessionRelay.shared.relay(phone: dict["phone"] as? String, token: dict["token"] as? String)
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
