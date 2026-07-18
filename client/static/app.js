@@ -3955,6 +3955,8 @@ async function startAgentSession() {
     if (difficultySelect && difficultySelect.value) {
       body.elo = parseInt(difficultySelect.value, 10);
     }
+    const personalitySelect = $("personality-select");
+    body.personality = personalitySelect ? personalitySelect.value : "formal";
 
     const res = await fetch(apiUrl("/api/games/new"), {
       method: "POST",

@@ -533,6 +533,11 @@
       <h3>🤖 Play the Agent</h3>
       <p>Thara is your in-app voice agent — speak your moves and watch the board update live. She dynamically matches your Elo rating (±20 Elo) for a balanced game.</p>
       <div class="bot-selector-row">
+        <label for="personality-select" class="sr-only">Thara's commentary style</label>
+        <select id="personality-select" class="bot-select-dropdown" style="margin-right: 10px;">
+          <option value="formal" selected>Formal Coach 👩🏼‍💼</option>
+          <option value="minimal">Minimalist (Moves Only) 🔇</option>
+        </select>
         <label for="difficulty-select" class="sr-only">Thara's strength</label>
         <select id="difficulty-select" class="bot-select-dropdown" style="margin-right: 10px;" title="Thara's strength">
           <option value="" selected>Match my rating ⚖️</option>

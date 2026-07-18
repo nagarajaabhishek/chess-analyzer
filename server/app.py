@@ -1853,6 +1853,7 @@ def create_watch_game():
         phone_clean = request.phone_clean
         data = request.json or {}
         elo_raw = data.get("elo")
+        commentary_style = data.get("personality") if data.get("personality") in ("formal", "minimal") else "formal"
 
         user = db.session.get(User, phone_clean)
         if not user:
@@ -1887,7 +1888,7 @@ def create_watch_game():
             black_phone=black_phone,
             source="voice_bot",
             bot_elo=bot_elo,
-            commentary_style="formal",
+            commentary_style=commentary_style,
             white_player=white_player,
             black_player=black_player,
             pgn="",
@@ -1900,6 +1901,12 @@ def create_watch_game():
 
         board = chess.Board()
         bot_san = _play_bot_move_if_due(game, board)
+        bot_commentary = generate_bot_commentary(
+            bot_elo=bot_elo,
+            player_move=None,
+            bot_move=bot_san,
+            commentary_style=commentary_style,
+        ) if bot_san else ""
 
         return jsonify({
             "game_id": game.id,
@@ -1909,7 +1916,7 @@ def create_watch_game():
             "white_player": white_player,
             "black_player": black_player,
             "bot_san": bot_san,
-            "speech": f"I play {_san_to_speech(bot_san)}." if bot_san else None,
+            "speech": (bot_commentary or f"I play {_san_to_speech(bot_san)}.") if bot_san else None,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2005,9 +2012,18 @@ def play_watch_move(game_id):
         speech = f"You played {_san_to_speech(played_san)}."
         game_over = game.result != "*"
         if bot_san:
-            speech += f" I play {_san_to_speech(bot_san)}."
-            if board.is_check():
-                speech += ", check"
+            bot_commentary = generate_bot_commentary(
+                bot_elo=game.bot_elo or 1500,
+                player_move=played_san,
+                bot_move=bot_san,
+                commentary_style=game.commentary_style or "formal",
+            )
+            if bot_commentary:
+                speech += f" {bot_commentary}"
+            else:
+                speech += f" I play {_san_to_speech(bot_san)}."
+                if board.is_check():
+                    speech += ", check"
         if game_over:
             elo_msg = _update_game_elo(game, game.result)
             speech += f" Game over.{elo_msg}"
