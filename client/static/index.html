@@ -647,25 +647,33 @@
 ═══════════════════════════════════════════ -->
 <div id="view-analysis" class="view hidden">
 
-  <!-- Top bar (used mainly while loading; result view uses sidebar header) -->
+  <!-- Top bar: back + opening. Phones show it during review (next to the menu button);
+       desktop hides it there because the sidebar header carries the same controls. -->
   <div class="analysis-topbar" id="analysis-topbar">
-    <button class="back-btn" id="analysis-back">← Games</button>
+    <button type="button" class="back-btn" id="analysis-back">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+      Back
+    </button>
     <span id="meta-opening" class="meta-opening"></span>
   </div>
 
   <!-- Loading state -->
   <div id="analysis-loading" class="loading-screen">
     <div class="loading-panel">
-      <div class="loading-board-ghost" aria-hidden="true"></div>
+      <!-- Plays the game through as each move is analysed -->
+      <div class="loading-board-wrap" aria-hidden="true">
+        <div id="loading-board" class="loading-board"></div>
+      </div>
       <div class="loading-info">
-        <div class="spinner" aria-hidden="true"></div>
-        <div class="loading-label">Analysing with Stockfish…</div>
-        <div id="loading-meta" class="loading-meta">Stockfish 19 · local WASM</div>
+        <div class="loading-label">Analysing your game…</div>
+        <div id="loading-game" class="loading-game"></div>
         <div id="loading-progress" class="loading-progress">Starting…</div>
-        <div class="progress-bar-wrap">
+        <div class="progress-bar-wrap" id="progress-bar-wrap" role="progressbar"
+             aria-label="Analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div id="progress-bar" class="progress-bar"></div>
         </div>
-        <p id="analysis-load-error" class="inline-error hidden"></p>
+        <div id="loading-meta" class="loading-meta">Stockfish 19 · runs in your browser</div>
+        <p id="analysis-load-error" class="inline-error hidden" role="alert"></p>
         <button type="button" id="btn-cancel-analysis" class="btn btn-ghost">Cancel</button>
         <button type="button" id="btn-analysis-error-back" class="btn btn-primary hidden">← Back to games</button>
       </div>
@@ -745,51 +753,55 @@
 
       <!-- Mobile Horizontal Moves Scroll Bar -->
       <div class="mobile-navigation-row" id="mobile-nav-row">
-        <button class="ctrl-btn-mobile" id="btn-mobile-prev" title="Previous Move">◀</button>
+        <button type="button" class="ctrl-btn-mobile" id="btn-mobile-prev" aria-label="Previous move">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="mobile-moves-scroll" id="mobile-moves-list"></div>
-        <button class="ctrl-btn-mobile" id="btn-mobile-next" title="Next Move">▶</button>
+        <button type="button" class="ctrl-btn-mobile" id="btn-mobile-next" aria-label="Next move">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
       </div>
 
       <button id="btn-main-line" class="main-line-btn hidden" title="Return to main game line">↩ Back to main line</button>
 
       <!-- Mobile Bottom Actions bar -->
       <div class="mobile-bottom-bar" id="mobile-action-bar">
-        <button class="mobile-action-btn" id="btn-mobile-flip">
-          <span class="mobile-action-icon">⟳</span>
+        <button type="button" class="mobile-action-btn" id="btn-mobile-flip">
+          <svg class="icon mobile-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V4M7 4L4 7M7 4l3 3M17 4v16M17 20l-3-3M17 20l3-3"/></svg>
           <span class="mobile-action-text">Flip</span>
         </button>
-        <button class="mobile-action-btn" id="btn-mobile-show-best">
-          <span class="mobile-action-icon">💡</span>
+        <button type="button" class="mobile-action-btn" id="btn-mobile-show-best">
+          <svg class="icon mobile-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>
           <span class="mobile-action-text">Best</span>
         </button>
-        <button class="mobile-action-btn" id="btn-mobile-retry">
-          <span class="mobile-action-icon">↻</span>
+        <button type="button" class="mobile-action-btn" id="btn-mobile-retry" title="Step back and try a better move">
+          <svg class="icon mobile-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h10a5 5 0 0 1 0 10H8M4 9l4-4M4 9l4 4"/></svg>
           <span class="mobile-action-text">Retry</span>
         </button>
-        <button class="mobile-action-btn btn-call" id="btn-mobile-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">
-          <span class="mobile-action-icon">📞</span>
+        <button type="button" class="mobile-action-btn btn-call" id="btn-mobile-call" title="Call the voice coach (uses cloud speech recognition, not local)">
+          <svg class="icon mobile-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
           <span class="mobile-action-text">Call</span>
         </button>
-        <button class="btn-mobile-primary-next" id="btn-mobile-next-key">
-          Next
+        <button type="button" class="btn-mobile-primary-next" id="btn-mobile-next-key">
+          Next mistake
         </button>
       </div>
 
-      <!-- Mobile Game Review Card (Scrollable Whitespace container) -->
+      <!-- Mobile Game Review Card -->
       <div id="mobile-review-card" class="mobile-review-card">
         <div class="mob-review-header">Game Review Summary</div>
-        
+
         <div class="mob-review-scroll-area">
           <!-- 1. Evaluation Chart Section -->
           <div class="mob-chart-section" style="margin-top: 0 !important;">
-            <div class="mob-chart-label">Win Probability Chart</div>
+            <div class="mob-chart-label">Win probability · tap to jump</div>
             <div class="mob-chart-wrap">
               <canvas id="mob-win-chart"></canvas>
             </div>
           </div>
 
-          <!-- 2. Classification Counts Grid -->
-          <div class="mob-cls-grid" id="mob-cls-grid" style="margin-top: 12px !important;"></div>
+          <!-- 2. Accuracy + move classes, White | class | Black (tap a count to jump) -->
+          <div class="review-table" id="mob-review-table"></div>
 
           <!-- 3. Game Metadata Info Grid -->
           <div class="mob-info-grid">
@@ -816,10 +828,19 @@
 
         <div class="sidebar-header">
           <div class="sidebar-header-row">
-            <button type="button" class="sidebar-back" id="analysis-back-sidebar" aria-label="Back to games">←</button>
-            <div class="sidebar-header-title">Game Review</div>
+            <button type="button" class="sidebar-back" id="analysis-back-sidebar" aria-label="Back to games" title="Back to games">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+            </button>
+            <div class="sidebar-header-text">
+              <div class="sidebar-header-title">Game Review</div>
+              <div id="meta-opening-sidebar" class="sidebar-opening"></div>
+            </div>
+            <!-- Voice coach lives here, away from the playback buttons -->
+            <button type="button" class="sidebar-call btn-call" id="btn-desktop-call" title="Call the voice coach (uses cloud speech recognition, not local)">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+              Call coach
+            </button>
           </div>
-          <div id="meta-opening-sidebar" class="sidebar-opening"></div>
         </div>
 
         <div id="cache-banner" class="cache-banner hidden" role="status">
@@ -842,13 +863,13 @@
           </div>
         </div>
 
-        <div class="sidebar-tabs">
-          <button class="sidebar-tab active" data-tab="moves">Moves</button>
-          <button class="sidebar-tab" data-tab="review">Review</button>
+        <div class="sidebar-tabs" role="tablist" aria-label="Review panels">
+          <button type="button" class="sidebar-tab active" id="tabbtn-moves" data-tab="moves" role="tab" aria-selected="true" aria-controls="tab-moves">Moves</button>
+          <button type="button" class="sidebar-tab" id="tabbtn-review" data-tab="review" role="tab" aria-selected="false" aria-controls="tab-review">Review</button>
         </div>
 
         <!-- TAB CONTENT: MOVES -->
-        <div class="tab-content" id="tab-moves">
+        <div class="tab-content" id="tab-moves" role="tabpanel" aria-labelledby="tabbtn-moves">
           <div class="moves-list-wrap">
             <div id="moves-list" class="moves-list"></div>
           </div>
@@ -866,56 +887,42 @@
         </div>
 
         <!-- TAB CONTENT: REVIEW -->
-        <div class="tab-content hidden" id="tab-review">
+        <div class="tab-content hidden" id="tab-review" role="tabpanel" aria-labelledby="tabbtn-review">
+          <!-- Chart is pinned: it doubles as the scrubber (click anywhere to jump) -->
+          <div class="chart-section">
+            <div class="chart-label">Win probability <span class="chart-hint">click to jump</span></div>
+            <div class="chart-wrap">
+              <canvas id="win-chart"></canvas>
+            </div>
+          </div>
           <div class="review-scroll-container">
-            <div class="desktop-summary-pills hidden" id="desktop-summary-pills"></div>
-            <div class="jump-filters" id="jump-filters" aria-label="Jump to key moments">
-              <button type="button" class="jump-chip" data-jump="brilliant">Brilliant</button>
-              <button type="button" class="jump-chip" data-jump="great">Great</button>
-              <button type="button" class="jump-chip" data-jump="miss">Miss</button>
-              <button type="button" class="jump-chip" data-jump="mistake">Mistake</button>
-              <button type="button" class="jump-chip" data-jump="blunder">Blunder</button>
-            </div>
-            <div class="accuracy-row-vertical">
-              <div class="acc-card-vertical" id="acc-card-white">
-                <div class="acc-card-header">
-                  <div class="acc-player-info">
-                    <div class="acc-color-dot white-dot"></div>
-                    <span class="acc-player-name" id="acc-white-name">White</span>
-                  </div>
-                  <div class="acc-big" id="acc-white-big">—</div>
-                </div>
-                <div class="cls-breakdown" id="cls-white"></div>
-              </div>
-              <div class="acc-card-vertical" id="acc-card-black">
-                <div class="acc-card-header">
-                  <div class="acc-player-info">
-                    <div class="acc-color-dot black-dot"></div>
-                    <span class="acc-player-name" id="acc-black-name">Black</span>
-                  </div>
-                  <div class="acc-big" id="acc-black-big">—</div>
-                </div>
-                <div class="cls-breakdown" id="cls-black"></div>
-              </div>
-            </div>
-            <div class="chart-section">
-              <div class="chart-label">Win Probability</div>
-              <div class="chart-wrap">
-                <canvas id="win-chart"></canvas>
-              </div>
-            </div>
+            <!-- Accuracy + move classes, White | class | Black (click a count to jump) -->
+            <div class="review-table" id="review-table"></div>
+          </div>
+          <div class="review-cta">
+            <button type="button" class="btn-next-key" id="btn-next-key">Next mistake</button>
           </div>
         </div>
 
-        <!-- Playback controls pinned to sidebar bottom (Chess.com pattern) -->
+        <!-- Playback controls pinned to sidebar bottom -->
         <div class="sidebar-controls" id="desktop-board-controls">
-          <button class="ctrl-btn" id="btn-first" title="First move">⏮</button>
-          <button class="ctrl-btn" id="btn-prev"  title="Previous">◀</button>
-          <span id="move-counter" class="move-counter">Start</span>
-          <button class="ctrl-btn" id="btn-next"  title="Next">▶</button>
-          <button class="ctrl-btn" id="btn-last"  title="Last move">⏭</button>
-          <button class="ctrl-btn" id="btn-flip"  title="Flip board">⟳</button>
-          <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">📞</button>
+          <button type="button" class="ctrl-btn" id="btn-first" aria-label="First move" title="First move (Home)">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6l-6 6 6 6M7 6v12"/></svg>
+          </button>
+          <button type="button" class="ctrl-btn" id="btn-prev" aria-label="Previous move" title="Previous move (←)">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <span id="move-counter" class="move-counter" aria-live="polite">Start</span>
+          <button type="button" class="ctrl-btn" id="btn-next" aria-label="Next move" title="Next move (→)">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <button type="button" class="ctrl-btn" id="btn-last" aria-label="Last move" title="Last move (End)">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l6 6-6 6M17 6v12"/></svg>
+          </button>
+          <span class="ctrl-divider" aria-hidden="true"></span>
+          <button type="button" class="ctrl-btn" id="btn-flip" aria-label="Flip board" title="Flip board">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V4M7 4L4 7M7 4l3 3M17 4v16M17 20l-3-3M17 20l3-3"/></svg>
+          </button>
         </div>
 
       </div>

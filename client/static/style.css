@@ -44,6 +44,25 @@
   --border-1:  var(--border);
   --text-1:    var(--text);
   --gold:      var(--accent);
+
+  /* ── Review panel surfaces (walnut, not the borrowed grey) ── */
+  --panel:        #1f160d;   /* panel body */
+  --panel-head:   #19110a;   /* header / tab strip / footer bars */
+  --panel-raised: #2a1e12;   /* cards and rows sitting on the panel */
+  --panel-line:   rgba(181,136,99,0.16);
+  --on-accent:    #1a1208;   /* text on gold */
+}
+
+/* Shared stroke icon — inherits text colour, sized by its container */
+.icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -322,6 +341,16 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 }
 #view-analysis.is-reviewing .analysis-topbar {
   display: none; /* back/opening live in the sidebar header during review */
+}
+/* Small-print text inside the analyzer: the global --text-3 is ~3:1 on these
+   surfaces, too dim for 11–12px labels. This tone clears 4.5:1. */
+#view-analysis {
+  --text-3: #a8875c;
+}
+#analysis-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1292,12 +1321,9 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 
 /* Loading — single centered column (board + progress) */
 .loading-screen {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
   width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 12px 24px 28px;
   box-sizing: border-box;
 }
@@ -1309,25 +1335,37 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   gap: 22px;
   width: 100%;
   max-width: 440px;
-  margin: 0 auto;
+  /* auto margins centre the panel when there is room and never push its top
+     (or the Cancel button) out of reach when the window is short */
+  margin: auto;
 }
-.loading-board-ghost {
-  width: min(360px, 70vw);
-  height: min(360px, 70vw);
-  aspect-ratio: 1;
+/* Live board that plays the game through while it is analysed.
+   Widths are 8k + 4: chessboard.js lays out 8 whole-pixel squares plus its own
+   2px border, so these sizes fill the wrapper exactly. */
+.loading-board-wrap {
   flex-shrink: 0;
-  background: linear-gradient(135deg, #f0d9b5 25%, #b58863 25%, #b58863 50%, #f0d9b5 50%, #f0d9b5 75%, #b58863 75%);
-  background-size: 45px 45px;
-  border-radius: var(--radius-lg);
-  opacity: .55;
-  box-shadow: 0 18px 48px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.06);
-  animation: pulse 2s ease-in-out infinite;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+.loading-board {
+  width: 324px;
 }
 @keyframes pulse { 0%,100% { opacity: .42; } 50% { opacity: .62; } }
 
+/* Short windows: shrink, then drop, the board so Cancel always stays on screen */
+@media (max-height: 760px) {
+  .loading-board { width: 228px; }
+  .loading-panel { gap: 14px; }
+}
+@media (max-height: 560px) {
+  .loading-board-wrap { display: none; }
+}
+
 .loading-info {
   width: 100%;
-  padding: 24px 26px 22px;
+  padding: 22px 26px 22px;
   text-align: center;
   background: rgba(36, 26, 15, 0.78);
   border: 1px solid var(--border-2);
@@ -1348,20 +1386,29 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 .loading-label {
   font-size: 18px;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--text);
 }
+/* Which game: "White vs Black · Opening" */
+.loading-game {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.loading-game:empty { display: none; }
 .loading-meta {
   font-size: 12px;
   color: var(--text-3);
-  margin-bottom: 14px;
+  margin-top: 12px;
   letter-spacing: 0.02em;
 }
 .loading-progress {
   font-size: 14px;
-  color: var(--text-2);
-  margin-bottom: 14px;
-  font-family: var(--mono);
+  color: var(--text);
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .progress-bar-wrap {
   background: rgba(0,0,0,0.35);
@@ -1394,7 +1441,8 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   margin: 0 auto;
   padding: 4px 20px 20px;
   display: flex;
-  flex-wrap: wrap;
+  /* Never wrap: the board is sized (getBoardSize) to leave room for the sidebar */
+  flex-wrap: nowrap;
   justify-content: center;
   align-content: flex-start;
   gap: var(--analysis-gap);
@@ -1403,6 +1451,15 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   min-height: min(100%, calc(100dvh - 70px - var(--safe-top) - 12px));
   overflow: visible;
   box-sizing: border-box;
+}
+
+/* Mid-width desktop windows: the workspace runs close to the left edge, where
+   the fixed menu button (12–56px) would sit on the top player's avatar. Indent
+   that one bar instead of shrinking the board. */
+@media (min-width: 901px) and (max-width: 1320px) {
+  body.is-reviewing #player-top {
+    padding-left: 48px;
+  }
 }
 
 /* ── Board column: players + board only — flush to top, no vertical centering gap ── */
@@ -1543,6 +1600,12 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   opacity: 0.85;
   font-size: 11px !important;
 }
+/* Cream labels vanish on the light squares — use the dark-square tone there */
+.white-1e1d7 .notation-322f9 {
+  color: #7a4a28 !important;
+  text-shadow: none !important;
+  opacity: 1;
+}
 #board, .board-b72b1 {
   touch-action: none !important;
 }
@@ -1564,6 +1627,41 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 
 .hl-blunder-from    { background: rgba(239, 68, 68, 0.25) !important; }
 .hl-blunder-to      { background: rgba(239, 68, 68, 0.50) !important; }
+
+/* Classes that previously had no square tint at all */
+.hl-brilliant-from  { background: rgba(34, 211, 238, 0.22) !important; }
+.hl-brilliant-to    { background: rgba(34, 211, 238, 0.42) !important; }
+
+.hl-great-from      { background: rgba(56, 189, 248, 0.22) !important; }
+.hl-great-to        { background: rgba(56, 189, 248, 0.40) !important; }
+
+.hl-book-from       { background: rgba(212, 160, 85, 0.20) !important; }
+.hl-book-to         { background: rgba(212, 160, 85, 0.38) !important; }
+
+.hl-miss-from       { background: rgba(232, 121, 249, 0.22) !important; }
+.hl-miss-to         { background: rgba(232, 121, 249, 0.42) !important; }
+
+/* Classification emoji in the corner of the move's destination square, so the
+   board itself says what kind of move it was (not just the tint colour). */
+.sq-badge {
+  position: absolute;
+  top: 3%;
+  right: 3%;
+  width: 36%;
+  height: 36%;
+  min-width: 17px;   /* stays legible on phone-sized squares */
+  min-height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(17, 12, 7, 0.86);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 12;
+}
 
 /* Controls */
 .board-controls {
@@ -1587,6 +1685,14 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   transition: all .15s;
 }
 .ctrl-btn:hover { color: var(--text); border-color: var(--border-2); }
+.ctrl-btn:focus-visible,
+.sidebar-tab:focus-visible,
+.sidebar-back:focus-visible,
+.rt-count:focus-visible,
+.btn-next-key:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 /* ── Variation blocks ──────────────────────────── */
 .variation-block {
   grid-column: 1 / -1;
@@ -1706,8 +1812,8 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 }
 
 .sidebar-container {
-  background: #262421;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   flex: 1 1 auto;
@@ -1722,32 +1828,36 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 
 .sidebar-header {
   flex-shrink: 0;
-  padding: 10px 12px 8px;
-  background: #1f1e1b;
-  border-bottom: 1px solid #2d2b27;
+  padding: 10px 12px;
+  background: var(--panel-head);
+  border-bottom: 1px solid var(--panel-line);
 }
 .sidebar-header-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .sidebar-back {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
-  font-size: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: color .15s, border-color .15s;
 }
 .sidebar-back:hover {
   color: var(--text);
   border-color: var(--border-2);
+}
+.sidebar-header-text {
+  flex: 1;
+  min-width: 0;
 }
 .sidebar-header-title {
   font-size: 15px;
@@ -1756,14 +1866,29 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   letter-spacing: -0.2px;
 }
 .sidebar-opening {
-  margin-top: 4px;
-  margin-left: 36px;
+  margin-top: 2px;
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Voice coach: labelled, and kept apart from the playback buttons */
+.sidebar-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sidebar-call .icon { width: 15px; height: 15px; }
 
 .coach-panel--sidebar {
   display: flex;
@@ -1773,8 +1898,8 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   margin: 0;
   padding: 10px 12px;
   gap: 10px;
-  border-bottom: 1px solid #2d2b27;
-  background: #211f1c;
+  border-bottom: 1px solid var(--panel-line);
+  background: var(--panel);
 }
 .coach-panel--sidebar .coach-avatar {
   width: 40px;
@@ -1782,13 +1907,13 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   font-size: 22px;
 }
 .coach-panel--sidebar .coach-bubble {
-  background: #2a2824;
-  border-color: rgba(255,255,255,0.08);
+  background: var(--panel-raised);
+  border-color: var(--border);
   padding: 8px 10px;
 }
 .coach-panel--sidebar .coach-bubble::before {
-  background: #2a2824;
-  border-color: rgba(255,255,255,0.08);
+  background: var(--panel-raised);
+  border-color: var(--border);
 }
 .coach-panel--sidebar.hidden {
   display: none !important;
@@ -1799,25 +1924,33 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   padding: 10px 12px;
-  background: #1f1e1b;
-  border-top: 1px solid #2d2b27;
+  background: var(--panel-head);
+  border-top: 1px solid var(--panel-line);
 }
 .sidebar-controls .ctrl-btn {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
 }
 .sidebar-controls .move-counter {
-  min-width: 64px;
+  min-width: 92px;
+  white-space: nowrap;
+}
+/* Sets "flip board" apart from the four playback buttons */
+.ctrl-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--border-2);
 }
 
 /* Tabs */
 .sidebar-tabs {
   display: flex;
   flex-shrink: 0;
-  background: #191815;      /* slightly darker header for tabs */
-  border-bottom: 2px solid #2d2b27;
+  background: var(--panel-head);
+  border-bottom: 2px solid var(--panel-line);
 }
 .sidebar-tab {
   flex: 1;
@@ -1847,7 +1980,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   left: 0;
   right: 0;
   height: 3px;
-  background: #81b64c;      /* Accent green bar */
+  background: var(--accent);
 }
 
 /* Tab contents */
@@ -1857,7 +1990,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: #211f1c;
+  background: var(--panel);
 }
 .tab-content.hidden {
   display: none !important;
@@ -1871,7 +2004,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border-2) transparent;
-  border-bottom: 1px solid #2d2b27;
+  border-bottom: 1px solid var(--panel-line);
 }
 .moves-list-wrap::-webkit-scrollbar {
   width: 6px;
@@ -1884,12 +2017,12 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   border-radius: 99px;
 }
 .review-scroll-container {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 4px 12px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
 }
 .review-scroll-container::-webkit-scrollbar,
 .moves-list-wrap::-webkit-scrollbar {
@@ -1901,127 +2034,166 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   border-radius: 99px;
 }
 
-/* Action button area — always stay visible; moves list scrolls above */
-.game-review-action {
-  padding: 10px 14px 12px;
-  background: #191815;
-  border-top: 1px solid #2d2b27;
-  flex-shrink: 0;
-}
-.btn-review {
-  width: 100%;
-  padding: 12px 16px;
-  background: #81b64c !important; /* Chess.com green */
-  color: #fff !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  border-radius: 8px !important;
-  border: none !important;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: 0 4px 12px rgba(129, 182, 76, 0.3);
-  transition: background 0.15s, transform 0.1s !important;
-}
-.btn-review:hover {
-  background: #95c25d !important;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(129, 182, 76, 0.45);
-}
-.btn-review:active {
-  transform: translateY(0);
-}
-.review-icon {
-  font-size: 20px;
-  color: #fff;
-}
-
-/* Tab-specific list configurations */
-.accuracy-row-vertical {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.acc-card-vertical {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: #272522;
-  border: 1px solid rgba(255,255,255,0.03);
-  border-radius: var(--radius);
-  padding: 14px;
-}
+/* ── Review tab: pinned chart, scrolling summary table, pinned action ── */
 .chart-section {
-  background: #272522;
-  border: 1px solid rgba(255,255,255,0.03);
+  flex-shrink: 0;
+  margin: 12px 12px 8px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 12px 12px 8px;
 }
-
-.acc-card-header {
+.chart-label {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-.acc-player-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.acc-player-name {
-  font-size: 14px;
+  align-items: baseline;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
 }
+.chart-hint {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+.chart-wrap { height: 110px; }
+
 .acc-color-dot {
   width: 12px; height: 12px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 .white-dot { background: #e8edf5; }
-.black-dot { background: #374151; border: 1px solid rgba(255,255,255,.15); }
-.acc-big {
-  font-size: 24px;
-  font-weight: 700;
-  color: #d4a055;
-  line-height: 1;
-}
-.cls-breakdown {
+.black-dot { background: #374151; border: 1px solid rgba(255,255,255,.25); }
+
+/* Summary table: White count | move class | Black count */
+.review-table {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  font-size: 11px;
-  margin-top: 2px;
-  padding-left: 20px;
+  flex-direction: column;
 }
-.cls-pip {
+.rt-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 6px 6px;
+}
+.rt-player {
   display: flex;
   align-items: center;
-  gap: 4px;
-  color: var(--text-2);
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.rt-player-right { justify-content: flex-end; }
+.rt-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cls-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.rt-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 6px;
+  border-top: 1px solid var(--panel-line);
 }
-
-.chart-label {
+.rt-cls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.rt-row > :first-child { justify-self: start; }
+.rt-row > :last-child  { justify-self: end; }
+.rt-acc {
+  min-height: 48px;
+  border-top: none;
+  border-radius: 10px;
+  background: var(--panel-raised);
+  margin-bottom: 4px;
+  padding: 0 12px;
+}
+.rt-acc + .rt-row { border-top: none; }
+.rt-acc-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.rt-acc-label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: .5px;
-  margin-bottom: 12px;
+  color: var(--text-3);
 }
-.chart-wrap { height: 120px; }
+.rt-count {
+  min-width: 36px;
+  height: 28px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+button.rt-count {
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+button.rt-count:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+.rt-zero {
+  color: var(--text-3);
+  font-weight: 500;
+}
+.cls-emoji {
+  font-size: 15px;
+  line-height: 1;
+  width: 20px;
+  text-align: center;
+}
+
+.review-cta {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--panel-line);
+}
+/* Primary action: gold, shared look with the mobile "Next mistake" button */
+.btn-next-key {
+  width: 100%;
+  height: 42px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter .15s, transform .1s;
+}
+.btn-next-key:hover { filter: brightness(1.08); }
+.btn-next-key:active { transform: translateY(1px); }
 
 .moves-list {
   padding: 8px 10px;
@@ -2069,21 +2241,24 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   color: #d4a055;
 }
 .move-cell.empty { cursor: default; }
-.move-cls-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
+/* Emoji marker per move classification (replaces the colour-only dot) */
+.cls-mark {
+  width: 18px;
   flex-shrink: 0;
-  opacity: 0.85;
+  justify-content: center;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 13px;
+  line-height: 1;
 }
-.cls-brilliant  .move-cls-dot { background: var(--brilliant); }
-.cls-great      .move-cls-dot { background: var(--great); }
-.cls-best       .move-cls-dot { background: var(--best); }
-.cls-excellent  .move-cls-dot { background: var(--excellent); }
-.cls-good       .move-cls-dot { background: var(--good); }
-.cls-inaccuracy .move-cls-dot { background: var(--inaccuracy); }
-.cls-mistake    .move-cls-dot { background: var(--mistake); }
-.cls-miss       .move-cls-dot { background: var(--miss); }
-.cls-blunder    .move-cls-dot { background: var(--blunder); }
+/* Routine moves (best / excellent / good / book) recede so key moments stand out */
+.cls-mark--quiet {
+  opacity: 0.4;
+  filter: saturate(0.5);
+}
+.move-cell.active .cls-mark--quiet {
+  opacity: 0.85;
+  filter: none;
+}
 
 /* Tooltip */
 .move-tooltip {
@@ -2119,8 +2294,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 
 /* Live Engine Panel */
 .live-engine-panel {
-  background: #191815;      /* matching tabs header */
-  border-top: 1px solid #2d2b27;
+  background: var(--panel-head);
   padding: 10px 16px;
   display: flex;
   flex-direction: column;
@@ -2163,13 +2337,14 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 .engine-line-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  background: #211f1c;
-  border: 1px solid rgba(255,255,255,0.03);
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
   border-radius: 6px;
   padding: 8px 12px;
   font-family: var(--mono);
   font-size: 13px;
+  min-width: 0;
 }
 .engine-line-item.empty {
   font-family: var(--font);
@@ -2182,20 +2357,33 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 }
 .line-rank {
   font-weight: 600;
-  margin-right: 8px;
+  width: 12px;
+  flex-shrink: 0;
 }
 .line-rank-1 { color: #4ade80; } /* green */
-.line-rank-2 { color: #3b82f6; } /* blue */
+.line-rank-2 { color: #60a5fa; } /* blue */
 .line-rank-3 { color: #f59e0b; } /* orange */
 
 .line-move {
   font-weight: 600;
   color: var(--text);
+  flex-shrink: 0;
+}
+/* Expected continuation after the first move — truncates before the score does */
+.line-pv {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-3);
 }
 .line-eval {
   font-weight: 500;
-  color: #d4a055; /* gold */
+  color: var(--accent);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* SVG Arrows */
@@ -2233,7 +2421,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 }
 .coach-bubble {
   position: relative;
-  background: #211f1c; /* chess.com dark sidebar dark */
+  background: var(--panel);
   border: 1.5px solid var(--border);
   border-radius: 12px;
   padding: 10px 14px;
@@ -2248,7 +2436,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   left: -7px;
   width: 12px;
   height: 12px;
-  background: #211f1c;
+  background: var(--panel);
   border-left: 1.5px solid var(--border);
   border-bottom: 1.5px solid var(--border);
   transform: rotate(45deg);
@@ -2274,6 +2462,14 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   font-size: 10px;
   font-weight: 700;
   color: #110c07;
+}
+/* Emoji badges bring their own colour — no disc behind them */
+.coach-badge--emoji {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  font-size: 15px;
+  line-height: 1;
 }
 .coach-text {
   font-size: 12.5px;
@@ -2323,10 +2519,6 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   }
   .moves-list-wrap {
     max-height: 280px;
-    height: 280px;
-  }
-  .loading-board-ghost {
-    width: 280px;
     height: 280px;
   }
 
@@ -2406,8 +2598,8 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   .player-accuracy .acc-value {
     font-size: 12.5px !important;
     font-weight: 700 !important;
-    background: #81b64c !important; /* chess.com green accuracy pill */
-    color: #fff !important;
+    background: var(--accent) !important; /* gold pill, dark text: 8:1 */
+    color: var(--on-accent) !important;
     padding: 2px 6px !important;
     border-radius: 4px !important;
   }
@@ -2439,9 +2631,31 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   .coach-panel--mobile.hidden {
     display: none !important;
   }
-  #view-analysis.is-reviewing .analysis-topbar {
-    display: flex; /* keep back button on mobile */
+  /* Phones have no sidebar header, so the top bar carries Back + opening during
+     review. It sits on the same row as the fixed menu button (left: 12px, 44px
+     wide) — the left padding clears it, so neither covers the player bar below.
+     Selector matches the specificity of the desktop "hide" rule it overrides. */
+  body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
+    display: flex;
+    min-height: 44px;
+    margin-top: 6px;
+    padding: 0 16px 0 68px;
   }
+  body.is-reviewing #view-analysis.is-reviewing .analysis-topbar .back-btn {
+    min-height: 36px;
+  }
+  body.is-reviewing #view-analysis.is-reviewing .analysis-topbar .meta-opening {
+    text-align: right;
+  }
+
+  /* Slim eval bar: the board is the content, and the coach header already
+     shows the number — so the label is dropped at this size. */
+  .board-eval-wrap { gap: 6px; }
+  .eval-bar-wrap,
+  .eval-bar-bg { width: 16px; }
+  .eval-bar-bg { border-radius: 6px; }
+  .eval-bar-fill { border-radius: 0 0 6px 6px; }
+  .eval-bar-label { display: none; }
 
   /* ── Mobile Horizontal Navigation Row ── */
   .mobile-navigation-row {
@@ -2451,19 +2665,19 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     gap: 8px;
     width: 100%;
     max-width: 480px;
-    background: #191815;
+    background: var(--panel-head);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    padding: 8px 12px;
+    padding: 8px 10px;
     margin-top: 4px !important;
   }
   .ctrl-btn-mobile {
     background: var(--card-2);
     border: 1px solid var(--border);
     color: var(--text);
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2513,12 +2727,9 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     font-weight: 700;
     text-decoration: underline;
   }
-  .mobile-move-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    flex-shrink: 0;
+  .mobile-move-item .cls-mark {
+    width: auto;
+    font-size: 12px;
   }
   .mobile-move-num {
     color: var(--text-3);
@@ -2531,13 +2742,32 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    max-width: 480px;
-    background: #191815;
-    padding: 8px 12px !important;
-    margin-top: 6px !important;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow);
+    background: var(--panel-head);
+    padding: 6px 8px !important;
+    border-radius: 14px;
+    border: 1px solid var(--border-2);
+    box-shadow: var(--shadow-lg);
+    /* Docked to the bottom of the screen so Next / Flip / Best stay reachable
+       on short phones and while reading the summary further down the page. */
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: min(480px, calc(100% - 24px));
+    margin: 0 !important;
+    z-index: 200; /* under the menu button (220) and drawer (240) */
+  }
+  /* Short phones: one row of moves instead of two, so the strip and the board
+     both fit above the docked bar */
+  @media (max-height: 720px) {
+    .mobile-moves-scroll {
+      height: 40px;
+      max-height: 40px;
+    }
+  }
+  /* Room at the end of the page so the docked bar never covers the last card */
+  body.is-reviewing #analysis-result.analysis-layout {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
   .mobile-action-btn {
     background: transparent;
@@ -2545,7 +2775,9 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    gap: 3px;
+    min-height: 44px;
     color: var(--text-2);
     cursor: pointer;
     font-size: 11px;
@@ -2553,26 +2785,43 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     flex: 1;
   }
   .mobile-action-icon {
-    font-size: 18px;
+    width: 20px;
+    height: 20px;
   }
-  .mobile-action-btn:active {
-    color: var(--text);
+  .mobile-action-btn:active,
+  .mobile-action-btn.active {
+    color: var(--accent);
+  }
+  .mobile-action-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* Call stays green (the one place green means "phone"), but without the
+     filled background that made it look like a selected tab */
+  .mobile-action-btn.btn-call,
+  .mobile-action-btn.btn-call:hover {
+    background: transparent !important;
+    color: #22c55e !important;
   }
   .btn-mobile-primary-next {
-    background: #81b64c; /* chess.com green button */
+    background: var(--accent);
     border: none;
-    border-radius: 8px;
-    color: #fff;
-    font-size: 15px;
+    border-radius: 10px;
+    color: var(--on-accent);
+    font-family: var(--font);
+    font-size: 14px;
     font-weight: 700;
-    padding: 10px 24px;
+    min-height: 44px;
+    padding: 0 10px;
+    margin-left: 6px;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(129,182,76,0.3);
-    flex: 1.5;
+    box-shadow: 0 4px 12px rgba(212,160,85,0.25);
+    flex: 2;
     text-align: center;
+    white-space: nowrap;
   }
   .btn-mobile-primary-next:active {
-    background: #6a9c3b;
+    filter: brightness(0.92);
     transform: translateY(1px);
   }
 }
@@ -2607,10 +2856,8 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     max-width: 360px;
     gap: 16px;
   }
-  .loading-board-ghost {
-    width: min(260px, 78vw);
-    height: min(260px, 78vw);
-    background-size: 32.5px 32.5px;
+  .loading-board {
+    width: 260px;
   }
   .loading-info {
     padding: 20px 16px;
@@ -2684,7 +2931,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   /* ── Mobile Game Review Card (Whitespace Use) ── */
   .mobile-review-card {
     display: block !important;
-    background: #1e1b18 !important; /* chess.com sidebar dark background */
+    background: var(--panel) !important;
     border: 1.5px solid var(--border) !important;
     border-radius: 12px !important;
     padding: 12px 14px !important;
@@ -2704,19 +2951,16 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     border-bottom: 1.5px solid var(--border) !important;
     padding-bottom: 4px !important;
   }
-  /* Scrollable container for mobile review details */
+  /* The summary flows with the page — no scroll box nested inside the page scroll */
   .mob-review-scroll-area {
-    max-height: 200px !important;
-    overflow-y: auto !important;
-    padding-right: 4px !important;
-    -webkit-overflow-scrolling: touch !important; /* momentum scroll on iOS */
+    overflow: visible !important;
   }
-  .mob-review-scroll-area::-webkit-scrollbar {
-    width: 4px !important;
+  .mobile-review-card .rt-row {
+    min-height: 40px; /* comfortable tap rows */
   }
-  .mob-review-scroll-area::-webkit-scrollbar-thumb {
-    background: var(--border) !important;
-    border-radius: 2px !important;
+  .mobile-review-card button.rt-count {
+    min-width: 44px;
+    height: 32px;
   }
 
   /* Mobile review chart styling */
@@ -2778,40 +3022,6 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
     white-space: nowrap !important;
     text-align: center !important;
   }
-  .mob-cls-grid {
-    display: grid !important;
-    grid-template-columns: repeat(3, 1fr) !important; /* 3 columns: Blunders, Mistakes, Inaccuracies */
-    gap: 8px !important;
-    margin-top: 6px !important;
-  }
-  .mob-cls-item {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    background: var(--card) !important;
-    border: 1px solid var(--border) !important;
-    padding: 6px 4px !important;
-    border-radius: 6px !important;
-  }
-  .mob-cls-num-row {
-    display: flex !important;
-    align-items: center !important;
-    gap: 4px !important;
-    font-weight: 700 !important;
-    font-size: 13.5px !important;
-  }
-  .mob-cls-dot {
-    width: 8px !important;
-    height: 8px !important;
-    border-radius: 50 !important;
-    border-radius: 50% !important;
-  }
-  .mob-cls-label {
-    font-size: 10px !important;
-    color: var(--text-3) !important;
-    margin-top: 2px !important;
-    font-weight: 600 !important;
-  }
 }
 
 /* Hide review card on desktop */
@@ -2864,7 +3074,7 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   gap: 12px;
 }
 .player-clock {
-  background: #262421;
+  background: var(--panel);
   color: var(--text);
   border: 1.5px solid var(--border);
   border-radius: 6px;
@@ -2894,41 +3104,6 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   color: inherit;
   opacity: 0.9;
 }
-
-/* Move Classification Summary Pills (Review tab) */
-.desktop-summary-pills {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  max-height: none;
-  overflow: visible;
-}
-.desktop-summary-pills.hidden {
-  display: none !important;
-}
-.summary-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 99px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #110c07;
-  box-shadow: var(--shadow);
-}
-.summary-pill.pill-brilliant  { background: var(--brilliant); }
-.summary-pill.pill-great      { background: var(--great); }
-.summary-pill.pill-best       { background: var(--best); }
-.summary-pill.pill-excellent  { background: var(--excellent); }
-.summary-pill.pill-good       { background: var(--good); }
-.summary-pill.pill-inaccuracy { background: var(--inaccuracy); }
-.summary-pill.pill-mistake    { background: var(--mistake); }
-.summary-pill.pill-miss       { background: var(--miss); }
-.summary-pill.pill-blunder    { background: var(--blunder); }
 
 
 /* ── Onboarding Phone Auth Overlay ── */
@@ -4294,26 +4469,6 @@ input:focus-visible, button:focus-visible, a:focus-visible, [role="button"]:focu
 .pgn-input:focus {
   outline: none;
   border-color: var(--accent);
-}
-.jump-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.jump-chip {
-  border: 1px solid var(--border-2);
-  background: var(--card);
-  color: var(--text-2);
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.jump-chip:hover {
-  border-color: var(--accent);
-  color: var(--text);
 }
 .btn-ghost {
   background: transparent;

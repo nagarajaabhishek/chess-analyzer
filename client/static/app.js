@@ -32,6 +32,16 @@ const state = {
 let useLocalWasm = true;   // Analyzer-first: always prefer in-browser Stockfish WASM
 let hasBackend = false;
 let analysisAbort = { cancelled: false };
+let analysisInProgress = false; // true while a full-game review owns the Stockfish worker
+// Engine state is declared up here (not beside the functions that use it) because
+// restoring a review after a page refresh runs live eval during the initial
+// routing call, before declarations further down this file have been initialised.
+let liveEvalSeq = 0;
+let liveEvalToken = 0;                    // newest evaluateMultiPV request
+let liveEvalChain = Promise.resolve();    // serialises live searches on the worker
+/** Warm Stockfish worker reused across review + live eval (Hash stays hot). */
+let sharedSfWorker = null;
+let sharedSfReady = null;
 const LAST_USERNAME_KEY = "chesscom_last_user";
 const ACTIVE_REVIEW_KEY = "chessnow_active_review";
 
@@ -86,17 +96,24 @@ function restoreActiveReview() {
 
 // Classification display config (win%-based labels + Chess.com-style extras)
 const CLS = {
-  brilliant:  { label: "Brilliant",  color: "#22d3ee", symbol: "!!", badge: "!!" },
-  great:      { label: "Great",      color: "#38bdf8", symbol: "!",  badge: "!" },
-  best:       { label: "Best",       color: "#22c55e", symbol: "✓",  badge: "★" },
-  excellent:  { label: "Excellent",  color: "#4ade80", symbol: "✓",  badge: "✓" },
-  good:       { label: "Good",       color: "#a3e635", symbol: "·",  badge: "·" },
-  book:       { label: "Book",       color: "#a3e635", symbol: "📖", badge: "📖" },
-  inaccuracy: { label: "Inaccuracy", color: "#fbbf24", symbol: "?!", badge: "?!" },
-  mistake:    { label: "Mistake",    color: "#f97316", symbol: "?",  badge: "?" },
-  miss:       { label: "Miss",       color: "#e879f9", symbol: "✖",  badge: "✖" },
-  blunder:    { label: "Blunder",    color: "#ef4444", symbol: "??", badge: "??" },
+  brilliant:  { label: "Brilliant",  color: "#22d3ee", symbol: "!!", badge: "!!", emoji: "💎" },
+  great:      { label: "Great",      color: "#38bdf8", symbol: "!",  badge: "!",  emoji: "🔥" },
+  best:       { label: "Best",       color: "#22c55e", symbol: "✓",  badge: "★",  emoji: "⭐" },
+  excellent:  { label: "Excellent",  color: "#4ade80", symbol: "✓",  badge: "✓",  emoji: "👍" },
+  good:       { label: "Good",       color: "#a3e635", symbol: "·",  badge: "·",  emoji: "✅" },
+  book:       { label: "Book",       color: "#a3e635", symbol: "📖", badge: "📖", emoji: "📖" },
+  inaccuracy: { label: "Inaccuracy", color: "#fbbf24", symbol: "?!", badge: "?!", emoji: "⚠️" },
+  mistake:    { label: "Mistake",    color: "#f97316", symbol: "?",  badge: "?",  emoji: "❓" },
+  miss:       { label: "Miss",       color: "#e879f9", symbol: "✖",  badge: "✖",  emoji: "❌" },
+  blunder:    { label: "Blunder",    color: "#ef4444", symbol: "??", badge: "??", emoji: "💥" },
 };
+// Display order for the review summary table (best → worst)
+const CLS_ORDER = ["brilliant", "great", "best", "excellent", "good", "book", "inaccuracy", "mistake", "miss", "blunder"];
+// Moves the "Next mistake" button stops on
+const ERROR_CLS = new Set(["inaccuracy", "mistake", "miss", "blunder"]);
+// Routine moves — their emoji is dimmed in move lists so key moments stand out
+const QUIET_CLS = new Set(["best", "excellent", "good", "book"]);
+const LOADING_LABEL = "Analysing your game…";
 
 // ── View helpers ───────────────────────────────────────
 function showView(id) {
@@ -234,6 +251,9 @@ async function loadDynamicContent(path) {
 // Global hash routing controller
 function handleHashRouting() {
   const hash = window.location.hash;
+  // Leaving the review while Stockfish is still running: stop it so it can't
+  // finish later and pop review chrome over whatever view the user moved to.
+  if (hash !== "#review" && analysisInProgress) cancelRunningAnalysis();
   const hashRoutes = {
     "#faq": "/faq",
     "#accessibility": "/accessibility",
@@ -563,22 +583,84 @@ async function startAnalysis(game, opts = {}) {
   $("meta-opening").textContent = openingLabel;
   const openingSidebar = $("meta-opening-sidebar");
   if (openingSidebar) openingSidebar.textContent = openingLabel;
-  $("progress-bar").style.width = "0%";
-  const mode = state.analysisMode || "normal";
+
+  // Say which game is being analysed — the wait is long enough to wonder
+  const loadLabel = document.querySelector("#analysis-loading .loading-label");
+  if (loadLabel) loadLabel.textContent = LOADING_LABEL;
+  const loadingGame = $("loading-game");
+  if (loadingGame) {
+    const players = game.white && game.black ? `${game.white} vs ${game.black}` : "";
+    loadingGame.textContent = [players, game.opening].filter(Boolean).join(" · ");
+  }
+  $("analysis-load-error")?.classList.add("hidden");
+  $("btn-analysis-error-back")?.classList.add("hidden");
+  setLoadingProgress(0, 0);
   $("loading-progress").textContent = "Starting…";
-  setAnalysisLoadingMeta(`Stockfish 19 · ${mode} · local WASM`);
+  const depthNote = { quick: "quick pass", deep: "deep pass" }[state.analysisMode] || "";
+  setAnalysisLoadingMeta(["Stockfish 19", depthNote, "runs in your browser"].filter(Boolean).join(" · "));
   const cancelBtn = $("btn-cancel-analysis");
   if (cancelBtn) cancelBtn.classList.remove("hidden");
 
   try {
     await runLocalWasmAnalysis(game);
   } catch (err) {
+    destroyLoadingBoard();
     if (analysisAbort.cancelled || err?.message === "cancelled") {
-      window.location.hash = state.games?.length ? "games" : "analysis";
+      // Only steer back to the list if the user is still on the review route —
+      // if they already navigated elsewhere, leave them where they went.
+      if (window.location.hash === "#review") {
+        window.location.hash = state.games?.length ? "games" : "analysis";
+      }
       return;
     }
     showAnalysisFatalError(err.message || "Analysis failed");
   }
+}
+
+/**
+ * Update the loading panel. `done`/`total` are plies; the text talks in full
+ * moves and adds a time estimate once there is enough signal to make one.
+ */
+function setLoadingProgress(done, total, startedAt) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  $("progress-bar").style.width = `${pct}%`;
+
+  let text = "Starting…";
+  if (total) {
+    text = `Move ${Math.max(1, Math.ceil(done / 2))} of ${Math.ceil(total / 2)}`;
+    if (startedAt && done >= 4 && done < total) {
+      const secsLeft = ((performance.now() - startedAt) / done) * (total - done) / 1000;
+      text += secsLeft < 5 ? " · almost done" : ` · about ${Math.ceil(secsLeft / 5) * 5}s left`;
+    }
+  }
+  $("loading-progress").textContent = text;
+
+  const wrap = $("progress-bar-wrap");
+  if (wrap) {
+    wrap.setAttribute("aria-valuenow", String(pct));
+    wrap.setAttribute("aria-valuetext", text);
+  }
+}
+
+// Small board on the loading panel that plays the game through as it is analysed
+function initLoadingBoard(game) {
+  destroyLoadingBoard();
+  const el = $("loading-board");
+  if (!el || !el.offsetWidth) return; // hidden on very short viewports
+  state.loadingBoard = Chessboard("loading-board", {
+    position: "start",
+    orientation: (game.player_color || "White") === "Black" ? "black" : "white",
+    pieceTheme: piece => "/pieces/" + piece + ".svg",
+    showNotation: false,
+    draggable: false,
+    moveSpeed: 120,
+  });
+}
+
+function destroyLoadingBoard() {
+  if (!state.loadingBoard) return;
+  try { state.loadingBoard.destroy(); } catch (_) {}
+  state.loadingBoard = null;
 }
 
 function showAnalysisFatalError(message) {
@@ -645,12 +727,21 @@ function renderAnalysis(result) {
   $("btn-cancel-analysis")?.classList.add("hidden");
   $("btn-analysis-error-back")?.classList.add("hidden");
   setReviewing(true);
+  destroyLoadingBoard();
   const loadLabel = document.querySelector("#analysis-loading .loading-label");
-  if (loadLabel) loadLabel.textContent = "Analysing with Stockfish…";
+  if (loadLabel) loadLabel.textContent = LOADING_LABEL;
+
+  // Reviews cached before the checkmate-label fix stored the final eval as "-M0"
+  result.moves.forEach(m => {
+    if (/^-?M0$/.test(m.eval_str || "")) m.eval_str = m.eval_cp >= 0 ? "1-0" : "0-1";
+  });
+
+  // Opening name: sidebar header on desktop, top bar on phones. Set both here so
+  // a review restored after a refresh (which skips startAnalysis) still shows it.
+  const openingLabel = result.opening || state.currentGame?.opening || $("meta-opening")?.textContent || "";
   const openingSidebar = $("meta-opening-sidebar");
-  if (openingSidebar) {
-    openingSidebar.textContent = result.opening || state.currentGame?.opening || $("meta-opening")?.textContent || "";
-  }
+  if (openingSidebar) openingSidebar.textContent = openingLabel;
+  if ($("meta-opening")) $("meta-opening").textContent = openingLabel;
 
   const g = state.currentGame || {};
   const isWhite = (g.player_color || "White") === "White";
@@ -664,22 +755,7 @@ function renderAnalysis(result) {
     fetchPlayerFlags(result.white_player, result.black_player);
   }
 
-  // Populate desktop moves classification summary pills
-  const counts = isWhite ? result.white_counts : result.black_counts;
-  updateSummaryPills(counts);
-
-  // ── Player bars ──────────────────────────────────────
-  // Top = opponent, Bottom = player (board default orientation)
-  const topColor   = isWhite ? "black" : "white";
-  const topName    = isWhite ? result.black_player : result.white_player;
-  const topAcc     = isWhite ? result.black_accuracy : result.white_accuracy;
-  const topRating  = isWhite ? g.black_rating : g.white_rating;
-  const botName    = isWhite ? result.white_player : result.black_player;
-  const botAcc     = isWhite ? result.white_accuracy : result.black_accuracy;
-  const botRating  = isWhite ? g.white_rating : g.black_rating;
-
-  setupPlayerBar("top",    topColor, topName, topRating, topAcc);
-  setupPlayerBar("bottom", isWhite ? "white" : "black", botName, botRating, botAcc);
+  renderPlayerBars(result);
 
   // Land on Review summary first; Moves tab is for replay
   openSidebarTab("review");
@@ -691,52 +767,14 @@ function renderAnalysis(result) {
     banner.classList.toggle("hidden", !state.fromCache || dismissed);
   }
 
-  // ── Accuracy cards ────────────────────────────────────
-  $("acc-white-big").textContent  = result.white_accuracy + "%";
-  $("acc-black-big").textContent  = result.black_accuracy + "%";
-  $("acc-white-name").textContent = result.white_player;
-  $("acc-black-name").textContent = result.black_player;
-  renderClsBreakdown("cls-white", result.white_counts);
-  renderClsBreakdown("cls-black", result.black_counts);
+  // ── Review summary: one White | class | Black table (desktop tab + mobile card)
+  renderReviewTable("review-table", result);
+  renderReviewTable("mob-review-table", result);
 
   // Populate mobile game review metadata
   if ($("mob-info-opening")) $("mob-info-opening").textContent = result.opening || g.opening || "Unknown Opening";
   if ($("mob-info-result")) $("mob-info-result").textContent = g.result || "Draw";
-  if ($("mob-info-moves")) $("mob-info-moves").textContent = result.moves.length;
-
-  const grid = $("mob-cls-grid");
-  if (grid) {
-    const bW = result.white_counts.blunder || 0;
-    const bB = result.black_counts.blunder || 0;
-    const mW = result.white_counts.mistake || 0;
-    const mB = result.black_counts.mistake || 0;
-    const iW = result.white_counts.inaccuracy || 0;
-    const iB = result.black_counts.inaccuracy || 0;
-
-    grid.innerHTML = `
-      <div class="mob-cls-item">
-        <div class="mob-cls-num-row">
-          <div class="mob-cls-dot" style="background:#ef4444"></div>
-          <span>${bW} <span style="font-weight:400;color:var(--text-3)">vs</span> ${bB}</span>
-        </div>
-        <span class="mob-cls-label">Blunders</span>
-      </div>
-      <div class="mob-cls-item">
-        <div class="mob-cls-num-row">
-          <div class="mob-cls-dot" style="background:#f97316"></div>
-          <span>${mW} <span style="font-weight:400;color:var(--text-3)">vs</span> ${mB}</span>
-        </div>
-        <span class="mob-cls-label">Mistakes</span>
-      </div>
-      <div class="mob-cls-item">
-        <div class="mob-cls-num-row">
-          <div class="mob-cls-dot" style="background:#fbbf24"></div>
-          <span>${iW} <span style="font-weight:400;color:var(--text-3)">vs</span> ${iB}</span>
-        </div>
-        <span class="mob-cls-label">Inaccuracies</span>
-      </div>
-    `;
-  }
+  if ($("mob-info-moves")) $("mob-info-moves").textContent = Math.ceil(result.moves.length / 2);
 
   // ── Board ─────────────────────────────────────────────
   initBoard(isWhite);
@@ -759,6 +797,24 @@ function renderAnalysis(result) {
   persistActiveReview();
 }
 
+// Player bars: top = opponent, bottom = player (board default orientation).
+// Separate from renderAnalysis so late-arriving country flags can refresh the
+// names without re-rendering (and resetting) the whole review.
+function renderPlayerBars(result) {
+  const g = state.currentGame || {};
+  const isWhite = (g.player_color || "White") === "White";
+  const topColor   = isWhite ? "black" : "white";
+  const topName    = isWhite ? result.black_player : result.white_player;
+  const topAcc     = isWhite ? result.black_accuracy : result.white_accuracy;
+  const topRating  = isWhite ? g.black_rating : g.white_rating;
+  const botName    = isWhite ? result.white_player : result.black_player;
+  const botAcc     = isWhite ? result.white_accuracy : result.black_accuracy;
+  const botRating  = isWhite ? g.white_rating : g.black_rating;
+
+  setupPlayerBar("top",    topColor, topName, topRating, topAcc);
+  setupPlayerBar("bottom", isWhite ? "white" : "black", botName, botRating, botAcc);
+}
+
 function setupPlayerBar(pos, color, name, rating, acc) {
   const av = $(`avatar-${pos}`);
   av.textContent = name[0]?.toUpperCase() || "?";
@@ -772,16 +828,61 @@ function setupPlayerBar(pos, color, name, rating, acc) {
   $(`acc-${pos}-val`).textContent = acc + "%";
 }
 
-function renderClsBreakdown(elId, counts) {
+/**
+ * Review summary table: accuracy on top, then one row per move class with
+ * White's count on the left and Black's on the right. Non-zero counts are
+ * buttons that jump to that player's next move of that class.
+ */
+function renderReviewTable(elId, result) {
   const el = $(elId);
-  el.innerHTML = Object.entries(counts)
-    .filter(([, n]) => n > 0)
-    .map(([cls, n]) => `
-      <div class="cls-pip">
-        <div class="cls-dot" style="background:${CLS[cls]?.color}"></div>
-        <span>${n} ${CLS[cls]?.label || cls}</span>
+  if (!el) return;
+  const w = result.white_counts || {};
+  const b = result.black_counts || {};
+
+  const countCell = (n, cls, color) => n > 0
+    ? `<button type="button" class="rt-count" data-cls="${cls}" data-color="${color}"
+         aria-label="${n} ${CLS[cls].label} by ${color === "white" ? "White" : "Black"} — jump to the next one">${n}</button>`
+    : `<span class="rt-count rt-zero">0</span>`;
+
+  const rows = CLS_ORDER
+    .filter(cls => (w[cls] || 0) + (b[cls] || 0) > 0)
+    .map(cls => `
+      <div class="rt-row">
+        ${countCell(w[cls] || 0, cls, "white")}
+        <span class="rt-cls"><span class="cls-emoji" aria-hidden="true">${CLS[cls].emoji}</span>${CLS[cls].label}</span>
+        ${countCell(b[cls] || 0, cls, "black")}
       </div>`)
     .join("");
+
+  el.innerHTML = `
+    <div class="rt-head">
+      <div class="rt-player">
+        <span class="acc-color-dot white-dot" aria-hidden="true"></span>
+        <span class="rt-name">${escapeHtml(result.white_player)}</span>
+      </div>
+      <div class="rt-player rt-player-right">
+        <span class="rt-name">${escapeHtml(result.black_player)}</span>
+        <span class="acc-color-dot black-dot" aria-hidden="true"></span>
+      </div>
+    </div>
+    <div class="rt-row rt-acc">
+      <span class="rt-acc-val">${result.white_accuracy}%</span>
+      <span class="rt-cls rt-acc-label">Accuracy</span>
+      <span class="rt-acc-val">${result.black_accuracy}%</span>
+    </div>
+    ${rows}`;
+}
+
+// One-line recap shown in the coach bubble at the start position
+function reviewSummaryHtml() {
+  const r = state.result;
+  if (!r) return "Step through the moves to see how the game went.";
+  // Kept to two lines on a phone so the board doesn't shift when you leave the
+  // start position; accuracy already sits beside each player's name.
+  const errors = r.moves.filter(m => ERROR_CLS.has(m.cls)).length;
+  return errors
+    ? `<b>${errors} move${errors === 1 ? "" : "s"}</b> worth a second look. Step through, or jump to the next mistake.`
+    : "A clean game — nothing flagged. Step through the moves to see why.";
 }
 
 // ── Board ──────────────────────────────────────────────
@@ -806,21 +907,44 @@ function getBoardColChrome() {
 }
 
 function getBoardSize() {
+  // Measure the real layout instead of mirroring CSS numbers here — a mismatch
+  // between the two is what used to push the sidebar underneath the board.
+  const px = v => parseFloat(v) || 0;
+  const layout = document.querySelector(".analysis-layout");
+  const layoutStyle = layout ? getComputedStyle(layout) : null;
+  const layoutInner = layout && layout.clientWidth
+    ? layout.clientWidth - px(layoutStyle.paddingLeft) - px(layoutStyle.paddingRight)
+    : window.innerWidth - 40;
+
+  const evalWrap = document.querySelector(".eval-bar-wrap");
+  const boardRow = document.querySelector(".board-eval-wrap");
+  const evalWidth = evalWrap ? evalWrap.getBoundingClientRect().width : 0;
+  const evalBar = evalWidth
+    ? evalWidth + px(getComputedStyle(boardRow).columnGap) // eval bar + gap to the board
+    : 52;
+
   const isMobile = window.innerWidth <= 900;
   if (isMobile) {
-    // Subtract safe margin padding (16px * 2) and eval bar width (42px + gap 10px)
-    const availableWidth = window.innerWidth - 32 - 52;
-    return Math.max(260, Math.min(availableWidth, 480));
+    const widthFit = Math.max(240, Math.min(Math.floor(layoutInner - evalBar), 480));
+
+    // Short phones: trim the board so the move strip still clears the docked
+    // action bar — but never below 280px, where the page scrolls instead.
+    const navRow = document.getElementById("mobile-nav-row");
+    const actionBar = document.getElementById("mobile-action-bar");
+    if (!boardRow || !navRow || !actionBar || !actionBar.offsetHeight) return widthFit;
+    const boardRect = boardRow.getBoundingClientRect();
+    const aboveBoard = boardRect.top + window.scrollY;                       // top bar, player, coach
+    const belowBoard = navRow.getBoundingClientRect().bottom - boardRect.bottom; // player + move strip
+    const dock = window.innerHeight - actionBar.getBoundingClientRect().top + 8; // docked bar + breathing room
+    const heightFit = Math.floor(window.innerHeight - aboveBoard - belowBoard - dock);
+    return Math.max(Math.min(widthFit, 280), Math.min(widthFit, heightFit));
   }
 
-  // Desktop: size board to the centered analysis workspace so board + sidebar sit together.
-  const workspaceMax = 1180;
-  const sidePad = 48;
-  const sidebar = Math.min(380, window.innerWidth * 0.34);
-  const gap = 28;
-  const evalBar = 52; // eval bar width + gap
-  const workspace = Math.min(workspaceMax, window.innerWidth - sidePad);
-  const availableWidth = workspace - sidebar - gap - evalBar;
+  // Desktop: board + sidebar share one row.
+  const rightCol = document.querySelector(".right-col");
+  const sidebar = (rightCol && rightCol.getBoundingClientRect().width) || Math.min(400, window.innerWidth * 0.36);
+  const gap = layoutStyle ? px(layoutStyle.columnGap) : 20;
+  const availableWidth = Math.floor(layoutInner - gap - sidebar - evalBar);
 
   // Fit board to the visible analysis viewport so content usually fits; page can still scroll if needed.
   const view = document.getElementById("view-analysis");
@@ -860,6 +984,8 @@ function resizeAnalysisBoard() {
       }
     }
   }
+
+  refreshBoardMarks();
 }
 
 function initBoard(playerIsWhite) {
@@ -1093,8 +1219,9 @@ function setCoachContent({ hidden, badgeText, badgeBg, badgeColor, title, html, 
     t.panel.classList.toggle("hidden", !!hidden);
     if (hidden) continue;
     if (t.badge) {
-      t.badge.className = "coach-badge";
-      t.badge.style.background = badgeBg || "var(--text-3)";
+      // Emoji badges carry their own colour; pass badgeBg only for plain-text badges
+      t.badge.className = badgeBg ? "coach-badge" : "coach-badge coach-badge--emoji";
+      t.badge.style.background = badgeBg || "transparent";
       t.badge.style.color = badgeColor || "#110c07";
       t.badge.textContent = badgeText || "·";
     }
@@ -1111,10 +1238,8 @@ function updateCoachBubble() {
     setCoachContent({
       hidden: false,
       badgeText: "🏁",
-      badgeBg: "#fff",
-      badgeColor: "#110c07",
-      title: "Starting Position",
-      text: "Analyze this game. Use the controls to walk through key moments.",
+      title: "Game Review",
+      html: reviewSummaryHtml(),
     });
     return;
   }
@@ -1166,12 +1291,58 @@ function updateCoachBubble() {
 
   setCoachContent({
     hidden: false,
-    badgeText: clsInfo?.badge || "·",
-    badgeBg: clsInfo?.color || "var(--text-3)",
+    badgeText: clsInfo?.emoji || "·",
+    badgeBg: clsInfo ? null : "var(--text-3)",
     badgeColor: "#110c07",
     title: `${clsInfo?.label || "Move"} · ${move.eval_str || "0.0"}`,
     html: comment,
   });
+}
+
+// ── "Next mistake" / Retry — shared by the mobile action bar and the desktop Review tab
+function nextErrorIndex() {
+  const moves = getActiveMoves();
+  for (let i = state.moveIndex + 1; i < moves.length; i++) {
+    if (ERROR_CLS.has(moves[i].cls)) return i;
+  }
+  return -1;
+}
+
+function advanceToNextKeyMove() {
+  const moves = getActiveMoves();
+  if (!moves.length) return;
+  const next = nextErrorIndex();
+  if (next !== -1) goToMove(next);
+  else if (state.moveIndex < moves.length - 1) goToMove(state.moveIndex + 1);
+  else goToMove(-1);
+}
+
+// Keep the button label honest about what a tap will do from the current move
+function updateReviewActions() {
+  const moves = getActiveMoves();
+  const label = nextErrorIndex() !== -1 ? "Next mistake"
+    : state.moveIndex < moves.length - 1 ? "Next move"
+    : "Back to start";
+  ["btn-mobile-next-key", "btn-next-key"].forEach(id => {
+    const btn = $(id);
+    if (btn) btn.textContent = label;
+  });
+
+  // Retry steps back so you can try a better move — only meaningful on an error
+  // or on a move you just tried yourself.
+  const current = moves[state.moveIndex];
+  const retry = $("btn-mobile-retry");
+  if (retry) retry.disabled = !(current && (ERROR_CLS.has(current.cls) || current.cls === "variation"));
+}
+
+// Jump to a move on the main game line, leaving any side variation first
+function goToMainLineMove(idx) {
+  if (state.currentVariationPath && state.currentVariationPath.length) {
+    state.currentVariationPath = [];
+    $("btn-main-line")?.classList.add("hidden");
+    renderMoveList(state.result.moves);
+  }
+  goToMove(idx);
 }
 
 function goToMove(idx) {
@@ -1196,7 +1367,8 @@ function goToMove(idx) {
     state.board.position(move.fen, false);
     if (state.chess) state.chess.load(move.fen);
     updateEvalBar(move.eval_cp, move.eval_str);
-    $('move-counter').textContent = `Move ${move.move_num}${move.color === 'black' ? '…' : '.'}`;
+    // Standard notation ("4. Nf3" / "4… Bxf3") — a bare "Move 4…" read as truncated text
+    $('move-counter').textContent = `${move.move_num}${move.color === 'black' ? '…' : '.'} ${move.san}`;
     highlightSquares(move.uci, move.cls);
     fen = move.fen;
   }
@@ -1224,6 +1396,10 @@ function goToMove(idx) {
 
   // Update Coach Speech bubble
   updateCoachBubble();
+  updateReviewActions();
+
+  // Move the cursor on the win-probability chart
+  if (state.chart) state.chart.update("none");
 
   // If path changed, rebuild the horizontal mobile moves bar (keeping it clean and preserving scroll on regular steps)
   if (state.lastRenderedPathStr !== currentPathStr) {
@@ -1250,6 +1426,7 @@ function goToMove(idx) {
     const cached = moves[state.moveIndex].engine_lines;
     state.liveEvalLines = cached;
     renderEngineLines(cached);
+    $("engine-lines-list").dataset.fen = fen;
   }
 
   triggerLiveEvaluation(fen);
@@ -1344,26 +1521,40 @@ function applyEndGameKingHighlights() {
 
 function highlightSquares(uci, cls) {
   // Clear any existing highlight classes
-  const classesToRemove = [
-    "hl-best-from", "hl-best-to",
-    "hl-excellent-from", "hl-excellent-to",
-    "hl-good-from", "hl-good-to",
-    "hl-inaccuracy-from", "hl-inaccuracy-to",
-    "hl-mistake-from", "hl-mistake-to",
-    "hl-blunder-from", "hl-blunder-to",
-    "hl-king-win", "hl-king-lose", "hl-king-draw"
-  ];
+  const classesToRemove = ["hl-king-win", "hl-king-lose", "hl-king-draw"];
+  Object.keys(CLS).forEach(c => classesToRemove.push(`hl-${c}-from`, `hl-${c}-to`));
   document.querySelectorAll("[class*='hl-']").forEach(el => {
     classesToRemove.forEach(c => el.classList.remove(c));
   });
+  document.querySelectorAll("#board .sq-badge").forEach(el => el.remove());
 
   if (!uci || !cls || uci.length < 4) return;
   const from = uci.slice(0, 2);
   const to   = uci.slice(2, 4);
-  const fromEl = document.getElementsByClassName(`square-${from}`)[0];
-  const toEl   = document.getElementsByClassName(`square-${to}`)[0];
+  const fromEl = document.querySelector(`#board .square-${from}`);
+  const toEl   = document.querySelector(`#board .square-${to}`);
   if (fromEl) fromEl.classList.add(`hl-${cls}-from`);
   if (toEl)   toEl.classList.add(`hl-${cls}-to`);
+
+  // Classification emoji in the corner of the destination square
+  if (toEl && CLS[cls]) {
+    const badge = document.createElement("span");
+    badge.className = "sq-badge";
+    badge.textContent = CLS[cls].emoji;
+    badge.setAttribute("aria-hidden", "true");
+    badge.style.fontSize = Math.max(11, Math.round(toEl.offsetWidth * 0.22)) + "px";
+    toEl.appendChild(badge);
+  }
+}
+
+// chessboard.js rebuilds every square on flip / resize, which drops the
+// highlight, the emoji badge and the arrows — put them back for the current move.
+function refreshBoardMarks() {
+  if (!state.result || !state.board) return;
+  const move = getActiveMoves()[state.moveIndex];
+  highlightSquares(move ? move.uci : null, move ? move.cls : null);
+  applyEndGameKingHighlights();
+  drawReviewArrows();
 }
 
 function updateEvalBar(cpWhite, label) {
@@ -1442,11 +1633,53 @@ function renderEngineLines(lines) {
   container.innerHTML = lines.map((m, idx) => {
     return `
     <div class="engine-line-item">
-      <span class="line-rank line-rank-${idx + 1}">#${idx + 1}</span>
-      <span class="line-move">${m.san}</span>
-      <span class="line-eval">${m.score}</span>
+      <span class="line-rank line-rank-${idx + 1}">${idx + 1}</span>
+      <span class="line-move">${escapeHtml(m.san)}</span>
+      <span class="line-pv">${escapeHtml(m.line || "")}</span>
+      <span class="line-eval">${escapeHtml(m.score)}</span>
     </div>`;
   }).join("");
+}
+
+/** "Checkmate" / "Stalemate" / "Draw" when the position has no moves to suggest. */
+function gameOverLabel(fen) {
+  try {
+    const c = new Chess(fen);
+    if (c.in_checkmate()) return "Checkmate — game over";
+    if (c.in_stalemate()) return "Stalemate — game over";
+    if (c.in_draw()) return "Drawn position";
+  } catch (_) {}
+  return "";
+}
+
+/**
+ * Raw live MultiPV rows (UCI moves, side-to-move scores) → display rows that
+ * match the cached review lines: SAN, White-POV score, plus a short continuation.
+ */
+function liveLinesForDisplay(rawLines, fen) {
+  const whiteToMove = (fen.split(" ")[1] || "w") === "w";
+  return rawLines.map((pv, i) => {
+    const sans = [];
+    try {
+      const tmp = new Chess(fen);
+      for (const uci of pv.pv.slice(0, 6)) {
+        const mv = tmp.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || undefined });
+        if (!mv) break;
+        sans.push(mv.san);
+      }
+    } catch (_) {}
+    const whiteCp = ReviewMath.stmCpToWhite(ReviewMath.stmToCp(pv.score, pv.mate), whiteToMove);
+    const mateWhite = pv.mate == null ? null : (whiteToMove ? pv.mate : -pv.mate);
+    return {
+      san: sans[0] || pv.uci,
+      uci: pv.uci,
+      cp: whiteCp,
+      score: formatScore(whiteCp, mateWhite),
+      line: sans.slice(1).join(" "),
+      rank: i + 1,
+      whitePov: true,
+    };
+  });
 }
 
 function getSquareCoordinates(square) {
@@ -1812,18 +2045,30 @@ function renderMobileMoveList(moves) {
     }
     item.appendChild(numSpan);
 
-    const dot = document.createElement("div");
-    dot.className = "mobile-move-dot";
-    dot.style.background = CLS[move.cls]?.color || "transparent";
-    item.appendChild(dot);
-
     const sanSpan = document.createElement("span");
     sanSpan.innerHTML = formatSanWithSymbol(move.san);
     item.appendChild(sanSpan);
 
+    // Emoji marker after the move (same set as the desktop list; routine ones dimmed)
+    if (CLS[move.cls]) {
+      const mark = makeClsMark(move.cls);
+      if (QUIET_CLS.has(move.cls)) mark.classList.add("cls-mark--quiet");
+      item.appendChild(mark);
+    }
+
     item.addEventListener("click", () => goToMove(idx));
     list.appendChild(item);
   });
+}
+
+// Emoji marker for a move classification, labelled for screen readers
+function makeClsMark(cls) {
+  const mark = document.createElement("span");
+  mark.className = "cls-mark";
+  mark.textContent = CLS[cls].emoji;
+  mark.setAttribute("role", "img");
+  mark.setAttribute("aria-label", CLS[cls].label);
+  return mark;
 }
 
 function formatSanWithSymbol(san) {
@@ -1904,9 +2149,12 @@ function makeMoveCell(move, idx, path) {
   }
 
   if (!isVar) {
-    const dot = document.createElement("div");
-    dot.className = "move-cls-dot";
-    cell.appendChild(dot);
+    // Emoji per classification (not colour alone); routine moves are dimmed via CSS
+    const mark = CLS[move.cls]
+      ? makeClsMark(move.cls)
+      : Object.assign(document.createElement("span"), { className: "cls-mark" });
+    if (QUIET_CLS.has(move.cls)) mark.classList.add("cls-mark--quiet");
+    cell.appendChild(mark);
   }
 
   const san = document.createElement("span");
@@ -1950,7 +2198,7 @@ function makeMoveCell(move, idx, path) {
 
 function showTooltip(e, move) {
   const tt = $("move-tooltip");
-  $("tooltip-cls").textContent = CLS[move.cls]?.label || move.cls;
+  $("tooltip-cls").textContent = CLS[move.cls] ? `${CLS[move.cls].emoji} ${CLS[move.cls].label}` : move.cls;
   $("tooltip-cls").style.color = CLS[move.cls]?.color || "#fff";
   $("tooltip-cpl").textContent = move.is_best
     ? "Engine's best move"
@@ -2001,18 +2249,53 @@ function renderChart(moves) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
 
+  // Dashed 50% line (equality) + a cursor on the move currently shown on the board
+  const reviewChartPlugin = {
+    id: "reviewChartMarks",
+    beforeDraw(chart) {
+      const { ctx, scales: { y } } = chart;
+      const y50 = y.getPixelForValue(50);
+      ctx.save();
+      ctx.strokeStyle = "rgba(240,217,181,0.14)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(chart.chartArea.left, y50);
+      ctx.lineTo(chart.chartArea.right, y50);
+      ctx.stroke();
+      ctx.restore();
+    },
+    afterDatasetsDraw(chart) {
+      const onMainLine = !(state.currentVariationPath && state.currentVariationPath.length);
+      const point = onMainLine ? chart.getDatasetMeta(0).data[state.moveIndex] : null;
+      if (!point) return;
+      const { ctx, chartArea } = chart;
+      ctx.save();
+      ctx.strokeStyle = "rgba(240,217,181,0.75)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(point.x, chartArea.top);
+      ctx.lineTo(point.x, chartArea.bottom);
+      ctx.stroke();
+      ctx.fillStyle = "#f0d9b5";
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    },
+  };
+
   state.chart = new Chart(ctx, {
     type: "line",
     data: {
       labels,
       datasets: [{
         data,
-        borderColor: "#4fffb0",
+        borderColor: "#d4a055",
         backgroundColor: (ctx) => {
           const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 120);
-          g.addColorStop(0,   "rgba(79,255,176,0.3)");
-          g.addColorStop(0.5, "rgba(79,255,176,0.05)");
-          g.addColorStop(1,   "rgba(239,68,68,0.05)");
+          g.addColorStop(0, "rgba(212,160,85,0.32)");
+          g.addColorStop(1, "rgba(212,160,85,0.03)");
           return g;
         },
         borderWidth: 1.5,
@@ -2021,29 +2304,37 @@ function renderChart(moves) {
         fill: true,
       }]
     },
+    plugins: [reviewChartPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode: "nearest", axis: "x" },
+      interaction: { mode: "nearest", axis: "x", intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            title: items => `Move ${items[0].label}`,
-            label: item => `White win prob: ${item.raw.toFixed(1)}%`,
+            // Labels are plies — show them the way the move list does ("12. Nf3" / "12… Nf6")
+            title: items => {
+              const m = moves[items[0].dataIndex];
+              return m ? `${m.move_num}${m.color === "black" ? "…" : "."} ${m.san}` : "";
+            },
+            label: item => `White win chance: ${item.raw.toFixed(1)}%`,
           },
-          backgroundColor: "#1a2235",
-          borderColor: "rgba(255,255,255,0.1)",
+          backgroundColor: "#241a0f",
+          titleColor: "#f0d9b5",
+          bodyColor: "#c4a070",
+          borderColor: "rgba(181,136,99,0.32)",
           borderWidth: 1,
+          displayColors: false,
         },
       },
       scales: {
         x: { display: false },
         y: {
           min: 0, max: 100,
-          grid: { color: "rgba(255,255,255,0.04)" },
+          grid: { color: "rgba(240,217,181,0.05)" },
           ticks: {
-            color: "#505a72",
+            color: "#a8875c",
             font: { size: 10 },
             callback: v => v === 50 ? "Equal" : v === 100 ? "White" : v === 0 ? "Black" : "",
           },
@@ -2052,7 +2343,7 @@ function renderChart(moves) {
       },
       onClick: (e, elements) => {
         if (elements.length > 0) {
-          goToMove(elements[0].index);
+          goToMainLineMove(elements[0].index);
         }
       },
       onHover: (e, elements) => {
@@ -2061,27 +2352,6 @@ function renderChart(moves) {
       },
     }
   });
-
-  // Add 50% guide line (equality)
-  const plugin = {
-    id: "equalityLine",
-    beforeDraw(chart) {
-      const { ctx, scales: { y } } = chart;
-      const y50 = y.getPixelForValue(50);
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(chart.chartArea.left, y50);
-      ctx.lineTo(chart.chartArea.right, y50);
-      ctx.stroke();
-      ctx.restore();
-    }
-  };
-  state.chart.options.plugins.equalityLine = {};
-  Chart.register(plugin);
-  state.chart.update();
 }
 
 // ══════════════════════════════════════════════════════
@@ -2153,6 +2423,7 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 
 // Analysis
 function leaveAnalysisToGames() {
+  if (analysisInProgress) cancelRunningAnalysis();
   setReviewing(false);
   // Prefer games list; fall back to Local Game Analyzer entry
   window.location.hash = state.games?.length ? "games" : "analysis";
@@ -2174,6 +2445,7 @@ $("btn-last").addEventListener("click",  () => goToMove((state.result?.moves.len
 $("btn-flip").addEventListener("click",  () => {
   state.flipped = !state.flipped;
   state.board?.flip();
+  refreshBoardMarks();
 });
 
 // Mobile navigation buttons
@@ -2184,6 +2456,7 @@ $("btn-mobile-next").addEventListener("click", () => goToMove(state.moveIndex + 
 $("btn-mobile-flip").addEventListener("click", () => {
   state.flipped = !state.flipped;
   state.board?.flip();
+  refreshBoardMarks();
 });
 $("btn-mobile-show-best").addEventListener("click", () => {
   state.showBestArrow = !state.showBestArrow;
@@ -2195,37 +2468,30 @@ $("btn-mobile-retry").addEventListener("click", () => {
   // Go back one move so the user can retry dragging a different variation
   goToMove(state.moveIndex - 1);
 });
-$("btn-mobile-next-key").addEventListener("click", () => {
-  const moves = getActiveMoves();
-  if (!moves.length) return;
+// Next mistake (falls back to next move, then back to start) — label kept in sync by updateReviewActions()
+$("btn-mobile-next-key").addEventListener("click", advanceToNextKeyMove);
+$("btn-next-key")?.addEventListener("click", advanceToNextKeyMove);
 
-  // Scan forward for next blunder, mistake, or inaccuracy (key moment of interest)
-  let nextKeyIdx = -1;
-  for (let i = state.moveIndex + 1; i < moves.length; i++) {
-    if (["blunder", "mistake", "miss", "inaccuracy"].includes(moves[i].cls)) {
-      nextKeyIdx = i;
-      break;
-    }
-  }
-
-  // If found, navigate to it; otherwise go to the next move (or loop back to start)
-  if (nextKeyIdx !== -1) {
-    goToMove(nextKeyIdx);
-  } else {
-    if (state.moveIndex < moves.length - 1) {
-      goToMove(state.moveIndex + 1);
-    } else {
-      goToMove(-1);
-    }
-  }
+// Review summary table: counts jump to that player's next move of that class
+["review-table", "mob-review-table"].forEach(id => {
+  $(id)?.addEventListener("click", e => {
+    const btn = e.target.closest("button.rt-count");
+    if (!btn) return;
+    jumpToNextClass(btn.dataset.cls, btn.dataset.color);
+    // The mobile summary sits below the board — bring the board back into view
+    if (id === "mob-review-table") window.scrollTo({ top: 0, behavior: "smooth" });
+  });
 });
 
 // Sidebar Tabs switching
 document.querySelectorAll(".sidebar-tab").forEach(tab => {
   tab.addEventListener("click", () => {
     const targetTab = tab.dataset.tab;
-    document.querySelectorAll(".sidebar-tab").forEach(t => t.classList.toggle("active", t === tab));
-    
+    document.querySelectorAll(".sidebar-tab").forEach(t => {
+      t.classList.toggle("active", t === tab);
+      t.setAttribute("aria-selected", t === tab ? "true" : "false");
+    });
+
     // Toggle active content divs
     $("tab-moves").classList.toggle("hidden", targetTab !== "moves");
     $("tab-review").classList.toggle("hidden", targetTab !== "review");
@@ -2576,15 +2842,17 @@ function gameFromPgn(pgnText) {
   };
 }
 
-function jumpToNextClass(cls) {
+// Jump to the next main-line move of a class (optionally one player's), wrapping
+// around at the end. Stays on the current tab so repeated clicks cycle through.
+function jumpToNextClass(cls, color) {
   if (!state.result?.moves?.length) return;
   const moves = state.result.moves;
-  const start = state.moveIndex + 1;
+  const onMainLine = !(state.currentVariationPath && state.currentVariationPath.length);
+  const start = onMainLine ? state.moveIndex + 1 : 0;
   for (let i = 0; i < moves.length; i++) {
     const idx = (start + i) % moves.length;
-    if (moves[idx].cls === cls) {
-      goToMove(idx);
-      openSidebarTab("moves");
+    if (moves[idx].cls === cls && (!color || moves[idx].color === color)) {
+      goToMainLineMove(idx);
       return;
     }
   }
@@ -2610,10 +2878,6 @@ function initAnalyzerExtras() {
   $("btn-dismiss-cache")?.addEventListener("click", () => {
     sessionStorage.setItem("chessnow_cache_banner_dismissed", "1");
     $("cache-banner")?.classList.add("hidden");
-  });
-
-  document.querySelectorAll(".jump-chip").forEach(chip => {
-    chip.addEventListener("click", () => jumpToNextClass(chip.dataset.jump));
   });
 
   $("pgn-analyze-btn")?.addEventListener("click", () => {
@@ -2704,10 +2968,6 @@ handleHashRouting();
 // STANDALONE OFFLINE / MOBILE FALLBACK ENGINE HELPERS
 // ══════════════════════════════════════════════════════
 
-/** Warm Stockfish worker reused across review + live eval (Hash stays hot). */
-let sharedSfWorker = null;
-let sharedSfReady = null;
-let analysisInProgress = false;
 
 function analysisLimitsForMode(mode) {
   // Depth is the quality target; movetime is a safety cap so mobile doesn't hang.
@@ -2907,6 +3167,9 @@ async function runLocalWasmAnalysis(game) {
   } finally {
     analysisInProgress = false;
   }
+  // Live eval is skipped while the review owns the worker, so the position the
+  // review just opened on has no engine lines yet — fetch them now.
+  if (state.result && state.chess) triggerLiveEvaluation(state.chess.fen());
 }
 
 async function runLocalWasmAnalysisUncached(game, cacheKey) {
@@ -2925,8 +3188,8 @@ async function runLocalWasmAnalysisUncached(game, cacheKey) {
   }
   const moves = chessInstance.history({ verbose: true });
   const totalMoves = moves.length;
-  $("progress-bar").style.width = "0%";
-  $("loading-progress").textContent = `0 / ${totalMoves} moves`;
+  setLoadingProgress(0, totalMoves);
+  initLoadingBoard(game);
 
   const worker = await getStockfishWorker();
   // Fresh TT for a new game; keep the same worker so Hash warms across plies.
@@ -2934,7 +3197,7 @@ async function runLocalWasmAnalysisUncached(game, cacheKey) {
   worker.postMessage("setoption name MultiPV value 3");
 
   const { depth: depthLimit, movetime: timeLimit } = analysisLimitsForMode(state.analysisMode);
-  $("loading-progress").textContent = `0 / ${totalMoves} moves · depth ${depthLimit}`;
+  const startedAt = performance.now();
 
   const movesData = [];
   const whiteAccEntries = [];
@@ -3053,10 +3316,8 @@ async function runLocalWasmAnalysisUncached(game, cacheKey) {
     prevCls = cls;
     lastEval = evalData;
 
-    const pct = Math.round(((i + 1) / totalMoves) * 100);
-    $("progress-bar").style.width = `${pct}%`;
-    const reached = evalData.depth != null ? ` · d${evalData.depth}` : "";
-    $("loading-progress").textContent = `${i + 1} / ${totalMoves} moves${reached}`;
+    setLoadingProgress(i + 1, totalMoves, startedAt);
+    if (state.loadingBoard) state.loadingBoard.position(postFen);
   }
 
   // Keep shared worker warm for the next review / live eval (do not terminate).
@@ -3192,26 +3453,43 @@ function calculateAccuracy(cpls) {
 }
 
 function formatScore(cp, mate) {
-  if (mate != null) return mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`;
+  if (mate != null) {
+    // mate 0 = the side to move is already checkmated: show the result, not "-M0"
+    if (mate === 0) return cp >= 0 ? "1-0" : "0-1";
+    return mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`;
+  }
   return (cp / 100 >= 0 ? "+" : "") + (cp / 100).toFixed(1);
 }
 
-let liveEvalSeq = 0;
 async function runLocalWasmLiveEval(fen) {
   // Shared worker is owned by full-game review while analysisInProgress.
   if (analysisInProgress) return;
 
   const linesList = $("engine-lines-list");
-  linesList.innerHTML = `<div class="engine-line-item empty">Engine thinking…</div>`;
-
   const seq = ++liveEvalSeq;
+
+  // Nothing to search once the game is over — say so instead of "no lines found"
+  const over = gameOverLabel(fen);
+  if (over) {
+    state.liveEvalLines = [];
+    linesList.innerHTML = `<div class="engine-line-item empty">${over}</div>`;
+    return;
+  }
+
+  // Lines cached from the review for this exact position stay on screen while the
+  // live search runs; anything else is stale and gets the placeholder.
+  if (linesList.dataset.fen !== fen) {
+    linesList.innerHTML = `<div class="engine-line-item empty">Engine thinking…</div>`;
+  }
+
   const worker = await getStockfishWorker();
-  // Stop any in-flight search before starting live MultiPV.
-  try { worker.postMessage("stop"); } catch (_) {}
 
   const { depth, movetime } = analysisLimitsForMode(state.analysisMode || "normal");
-  const lines = await evaluateMultiPV(worker, fen, Math.min(depth, 14), Math.min(movetime, 400));
+  // evaluateMultiPV stops any in-flight search and waits its turn
+  const rawLines = await evaluateMultiPV(worker, fen, Math.min(depth, 14), Math.min(movetime, 400));
   if (seq !== liveEvalSeq) return; // superseded by a newer live eval
+  const lines = liveLinesForDisplay(rawLines, fen);
+  linesList.dataset.fen = fen;
 
   state.liveEvalLines = lines;
   renderEngineLines(lines);
@@ -3227,12 +3505,27 @@ async function runLocalWasmLiveEval(fen) {
   }
 }
 
+/**
+ * Live MultiPV search. Calls are serialised on one worker: "stop" makes
+ * Stockfish answer with a bestmove for the *old* search, so a listener attached
+ * before that arrives would report the previous position's lines as its own.
+ * A request that has been superseded by the time its turn comes is skipped.
+ */
 function evaluateMultiPV(worker, fen, depth, timeLimit) {
+  const token = ++liveEvalToken;
+  try { worker.postMessage("stop"); } catch (_) {}
+  const run = () => (token === liveEvalToken ? searchMultiPV(worker, fen, depth, timeLimit) : Promise.resolve([]));
+  liveEvalChain = liveEvalChain.then(run, run);
+  return liveEvalChain;
+}
+
+function searchMultiPV(worker, fen, depth, timeLimit) {
   return new Promise(resolve => {
     let pvs = [];
     
     const onMsg = (e) => {
       const line = e.data;
+      if (typeof line !== "string") return;
       if (line.startsWith("info depth")) {
         const multipvMatch = line.match(/multipv (\d+)/);
         if (multipvMatch) {
@@ -3245,35 +3538,28 @@ function evaluateMultiPV(worker, fen, depth, timeLimit) {
           const mateMatch = line.match(/score mate (-?\d+)/);
           if (mateMatch) mate = parseInt(mateMatch[1]);
           
-          const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
-          const bestMove = pvMatch ? pvMatch[1] : "";
-          
-          if (bestMove) {
-            const parts = fen.split(" ");
-            const turn = parts[1] || "w";
-            
-            let score_str = "";
-            if (mate !== null) {
-              score_str = `M${Math.abs(mate)}`;
-            } else {
-              const score_val = (score / 100.0);
-              score_str = score_val > 0 ? `+${score_val.toFixed(2)}` : score_val.toFixed(2);
-            }
+          // Full principal variation, e.g. " pv e2e4 e7e5 g1f3"
+          const pvMatch = line.match(/ pv ((?:[a-h][1-8][a-h][1-8][qrbn]?\s*)+)/);
+          const pvMoves = pvMatch ? pvMatch[1].trim().split(/\s+/) : [];
 
-            pvs[rank] = {
-              uci: bestMove,
-              san: bestMove,
-              score: score_str,
-              cp: score
-            };
+          if (pvMoves.length) {
+            // Raw side-to-move values; liveLinesForDisplay() turns these into SAN + White-POV scores
+            pvs[rank] = { uci: pvMoves[0], pv: pvMoves, score, mate };
           }
         }
       } else if (line.startsWith("bestmove")) {
         worker.removeEventListener("message", onMsg);
+        clearTimeout(bail);
         const sorted = pvs.filter(x => x !== undefined).slice(0, 3);
         resolve(sorted);
       }
     };
+
+    // If the worker never answers, give up rather than block every later search
+    const bail = setTimeout(() => {
+      worker.removeEventListener("message", onMsg);
+      resolve(pvs.filter(x => x !== undefined).slice(0, 3));
+    }, Math.max(timeLimit * 3, 3000));
 
     worker.addEventListener("message", onMsg);
     worker.postMessage("setoption name MultiPV value 3");
@@ -3353,9 +3639,11 @@ async function fetchPlayerFlags(whiteName, blackName) {
       state.playerFlags.black = getFlagEmoji(code);
     }
     
-    // Re-render to show the country flags next to names
+    // Show the country flags next to the names. Only the player bars are redrawn:
+    // a full renderAnalysis() here used to snap the board back to the start and
+    // reopen the Review tab a moment after the user had begun stepping through.
     if (state.result) {
-      renderAnalysis(state.result);
+      renderPlayerBars(state.result);
     }
   } catch (e) {
     console.warn("Error fetching Chess.com profiles:", e);
@@ -3487,43 +3775,6 @@ function updateClocks(idx) {
   }
 }
 
-function updateSummaryPills(counts) {
-  const container = $("desktop-summary-pills");
-  if (!container) return;
-  container.innerHTML = "";
-  
-  if (!counts) {
-    container.classList.add("hidden");
-    return;
-  }
-  
-  container.classList.remove("hidden");
-  
-  const pillConfigs = [
-    { key: "brilliant",  icon: "!!", class: "pill-brilliant",  label: "Brilliant" },
-    { key: "great",      icon: "!",  class: "pill-great",      label: "Great" },
-    { key: "best",       icon: "★",  class: "pill-best",       label: "Best" },
-    { key: "excellent",  icon: "👍", class: "pill-excellent",  label: "Excellent" },
-    { key: "good",       icon: "✔",  class: "pill-good",       label: "Good" },
-    { key: "book",       icon: "📖", class: "pill-good",       label: "Book" },
-    { key: "inaccuracy", icon: "☡",  class: "pill-inaccuracy", label: "Inaccuracy" },
-    { key: "mistake",    icon: "❓", class: "pill-mistake",    label: "Mistake" },
-    { key: "miss",       icon: "✖",  class: "pill-miss",       label: "Miss" },
-    { key: "blunder",    icon: "❌", class: "pill-blunder",    label: "Blunder" }
-  ];
-  
-  pillConfigs.forEach(cfg => {
-    const val = counts[cfg.key] || 0;
-    if (val > 0) {
-      const pill = document.createElement("span");
-      pill.className = `summary-pill ${cfg.class}`;
-      pill.innerHTML = `${cfg.icon} ${val}`;
-      pill.title = `${val} ${cfg.label} Move${val > 1 ? 's' : ''}`;
-      container.appendChild(pill);
-    }
-  });
-}
-
 function updateCoachBubbleWithLiveEval(lines) {
   if (!lines || !lines.length) return;
   const moves = getActiveMoves();
@@ -3537,11 +3788,11 @@ function updateCoachBubbleWithLiveEval(lines) {
     const bestMove = topLine.san;
     
     // Update live evaluation bar (Rating Bar)
-    // Convert relative engine score (POV of side to move) to White POV for the eval bar
+    // Local WASM lines are already White-POV; server lines are side-to-move and need flipping
     const isWhiteTurn = state.chess ? state.chess.turn() === 'w' : true;
     let cpWhite = topLine.cp;
     let evalStrWhite = evalStr;
-    if (!isWhiteTurn) {
+    if (!isWhiteTurn && !topLine.whitePov) {
       cpWhite = -cpWhite;
       if (evalStrWhite.startsWith("+")) {
         evalStrWhite = "-" + evalStrWhite.slice(1);
@@ -3555,15 +3806,16 @@ function updateCoachBubbleWithLiveEval(lines) {
     }
     updateEvalBar(cpWhite, evalStrWhite);
 
+    // At the start of the main line the coach shows the review summary — keep it
+    if (!move && !isVar) return;
+
     setCoachContent({
       hidden: false,
       badgeText: "🔍",
-      badgeBg: "#d4a055",
-      badgeColor: "#110c07",
       title: `Analysis · ${evalStr}`,
       html: move
-        ? `You played <b>${move.san}</b>. Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`
-        : `Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`,
+        ? `You played <b>${escapeHtml(move.san)}</b>. Stockfish evaluates this position at <b>${escapeHtml(evalStr)}</b>. The best reply is <b>${escapeHtml(bestMove)}</b>.`
+        : `Stockfish evaluates this position at <b>${escapeHtml(evalStr)}</b>. The best move is <b>${escapeHtml(bestMove)}</b>.`,
     });
   }
 }
