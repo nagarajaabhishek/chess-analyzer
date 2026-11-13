@@ -6,3 +6,5 @@ analysis_cache.json
 *.db
 ios/App/App/public/
 .claude/
+.vendor/
+.dev/docs/

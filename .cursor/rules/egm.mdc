@@ -1,0 +1,14 @@
+---
+description: Elephant-Goldfish Model routing for design/brainstorm/review workflows.
+alwaysApply: false
+---
+When the user invokes EGM (`egm-brainstorm`, `egm-draft`, `egm-review`, `egm-resolve`, `egm-bootstrap`, `egm-drift-report`, `egm-review-loop`, or "elephant-goldfish" / "goldfish review"):
+
+1. Set `EGM_ROOT` to `/Users/abhisheknagaraja/.cursor/plugins/local/egm` (absolute). Confirm `EGM_ROOT/docs/cursor.md`, `EGM_ROOT/skills/`, `EGM_ROOT/agents/`, and `EGM_ROOT/resources/` exist. If missing, tell the user to run `./scripts/setup-egm.sh` and reload Cursor.
+2. Honor `EGM artifact directory: .dev/docs` (create if needed). Approved specs go under `docs/designs/`.
+3. Read `EGM_ROOT/docs/cursor.md`, then read and follow `EGM_ROOT/skills/<skill>/SKILL.md` for the requested skill.
+4. Goldfish: spawn a **new** Cursor Task per reviewer persona under `EGM_ROOT/.cursor-plugin/agents/` (or tell the child to read `EGM_ROOT/agents/<persona>.md` first). Pass only absolute paths and explicit Goldfish context — no parent chat history. Never resume a reviewer. Never fake a Goldfish in the parent thread.
+5. Write briefs/drafts/reports to files under `.dev/docs/`; keep chat to short status + file links.
+6. Product name in user-facing copy: **ChessNow**. Voice code lives primarily in `server/`.
+
+Project guide: `docs/egm.md`.

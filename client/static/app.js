@@ -27,6 +27,8 @@ const state = {
   showBestArrow: true,  // show best-move arrow on mistakes by default
   fromCache: false,
   forceReanalyze: false,
+  selectedSquare: null, // square with legal-move hints shown
+  suppressBoardClickUntil: 0, // ignore click that follows a same-square drag
 };
 
 let useLocalWasm = true;   // Analyzer-first: always prefer in-browser Stockfish WASM
@@ -1018,6 +1020,7 @@ function initBoard(playerIsWhite) {
 
   // Enable touch dragging on mobile devices
   enableMobilePieceDragging();
+  enableBoardSquareSelection();
 }
 
 function enableMobilePieceDragging() {
@@ -1063,17 +1066,99 @@ window.addEventListener("resize", () => {
   if (state.board && state.result) resizeAnalysisBoard();
 });
 
+function clearLegalMoves() {
+  document.querySelectorAll("#board .legal-move, #board .legal-capture, #board .legal-origin")
+    .forEach((el) => el.classList.remove("legal-move", "legal-capture", "legal-origin"));
+}
+
+function showLegalMoves(square) {
+  clearLegalMoves();
+  if (!state.chess || !square) return;
+  const moves = state.chess.moves({ square, verbose: true });
+  if (!moves.length) return;
+
+  const origin = document.querySelector(`#board .square-${square}`);
+  if (origin) origin.classList.add("legal-origin");
+
+  for (const m of moves) {
+    const el = document.querySelector(`#board .square-${m.to}`);
+    if (!el) continue;
+    // Capture (incl. en passant) gets a ring; empty squares get a centre dot
+    const isCapture = !!(m.captured || (m.flags && m.flags.includes("e")));
+    el.classList.add(isCapture ? "legal-capture" : "legal-move");
+  }
+}
+
+function squareFromBoardEventTarget(target) {
+  const sq = target && target.closest ? target.closest("[class*='square-']") : null;
+  if (!sq) return null;
+  const match = [...sq.classList].find((c) => /^square-[a-h][1-8]$/.test(c));
+  return match ? match.slice("square-".length) : null;
+}
+
+function isOwnPieceAt(square) {
+  if (!state.chess || !square) return false;
+  const piece = state.chess.get(square);
+  if (!piece) return false;
+  return piece.color === state.chess.turn();
+}
+
+function enableBoardSquareSelection() {
+  const boardEl = document.getElementById("board");
+  if (!boardEl || boardEl.dataset.legalSelectBound === "1") return;
+  boardEl.dataset.legalSelectBound = "1";
+
+  boardEl.addEventListener("click", (e) => {
+    if (!state.chess || !state.board || !state.result) return;
+    const square = squareFromBoardEventTarget(e.target);
+    if (!square) return;
+    onBoardSquareClick(square);
+  });
+}
+
+function onBoardSquareClick(square) {
+  // Drag-click on a piece also fires a DOM click — don't toggle selection off
+  if (Date.now() < (state.suppressBoardClickUntil || 0)) return;
+
+  // Second click: play a hinted move, or re-select / clear
+  if (state.selectedSquare) {
+    if (square === state.selectedSquare) {
+      state.selectedSquare = null;
+      clearLegalMoves();
+      return;
+    }
+    const legal = state.chess.moves({ square: state.selectedSquare, verbose: true });
+    if (legal.some((m) => m.to === square)) {
+      const from = state.selectedSquare;
+      state.selectedSquare = null;
+      clearLegalMoves();
+      commitBoardMove(from, square);
+      return;
+    }
+  }
+
+  if (isOwnPieceAt(square)) {
+    state.selectedSquare = square;
+    showLegalMoves(square);
+  } else {
+    state.selectedSquare = null;
+    clearLegalMoves();
+  }
+}
+
 // Only allow the side-to-move's pieces to be dragged
 function handleDragStart(source, piece) {
   if (!state.chess) return false;
   if (state.chess.turn() === 'w' && piece.startsWith('b')) return false;
   if (state.chess.turn() === 'b' && piece.startsWith('w')) return false;
+  state.selectedSquare = source;
+  showLegalMoves(source);
   return true;
 }
 
-// Validate drop — snap back if illegal
-function handleDrop(source, target) {
-  if (!state.chess) return 'snapback';
+// Apply a move from drag or click-to-move. Returns true if legal.
+function commitBoardMove(source, target) {
+  if (!state.chess) return false;
 
   // Detect promotion before committing so the user can pick the piece instead of
   // always auto-queening — underpromotions are rare but real (e.g. stalemate tricks).
@@ -1087,7 +1172,45 @@ function handleDrop(source, target) {
   }
 
   const move = state.chess.move({ from: source, to: target, promotion });
-  return move ? undefined : 'snapback';
+  if (!move) return false;
+  if (state.board) state.board.position(state.chess.fen(), false);
+  handleSnapEnd();
+  return true;
+}
+
+// Validate drop — snap back if illegal
+function handleDrop(source, target) {
+  if (!state.chess) return 'snapback';
+
+  // Click (no drag distance): keep selection + hints instead of clearing
+  if (source === target) {
+    state.selectedSquare = source;
+    showLegalMoves(source);
+    state.suppressBoardClickUntil = Date.now() + 350;
+    return 'snapback';
+  }
+
+  const candidateMoves = state.chess.moves({ square: source, verbose: true });
+  const isPromotion = candidateMoves.some(m => m.to === target && m.flags.includes('p'));
+
+  let promotion = 'q';
+  if (isPromotion) {
+    const choice = (window.prompt("Promote to: Q, R, B, or N?", "Q") || "Q").trim().toLowerCase();
+    promotion = ['q', 'r', 'b', 'n'].includes(choice) ? choice : 'q';
+  }
+
+  const move = state.chess.move({ from: source, to: target, promotion });
+  if (!move) {
+    // Illegal drop — keep the piece selected so hints stay visible
+    state.selectedSquare = source;
+    showLegalMoves(source);
+    state.suppressBoardClickUntil = Date.now() + 350;
+    return 'snapback';
+  }
+
+  state.selectedSquare = null;
+  clearLegalMoves();
+  return undefined;
 }
 
 // Returns the currently active moves array walking down the variation path
@@ -1293,9 +1416,10 @@ function updateCoachBubble() {
 
   setCoachContent({
     hidden: false,
-    badgeText: clsInfo?.emoji || "·",
-    badgeBg: clsInfo ? null : "var(--text-3)",
-    badgeColor: "#110c07",
+    // Colored disc + classification glyph for this move (not a fixed emoji/style)
+    badgeText: clsInfo?.badge || "·",
+    badgeBg: clsInfo?.color || "var(--text-3)",
+    badgeColor: clsInfo ? clsBadgeContrast(move.cls) : "#110c07",
     title: `${clsInfo?.label || "Move"} · ${move.eval_str || "0.0"}`,
     html: comment,
   });
@@ -1354,6 +1478,9 @@ function goToMove(idx) {
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   let fen = START_FEN;
 
+  state.selectedSquare = null;
+  clearLegalMoves();
+
   // Clear existing engine arrows before evaluating new position
   const oldSvg = document.getElementById("board-arrows-svg");
   if (oldSvg) oldSvg.remove();
@@ -1363,7 +1490,8 @@ function goToMove(idx) {
     if (state.chess) state.chess.load(START_FEN);
     updateEvalBar(0, '0.0');
     $('move-counter').textContent = 'Start';
-    highlightSquares(null);
+    // chessboard.js may rebuild squares after position(); re-apply on next frames
+    scheduleBoardMarks(null, null);
   } else {
     const move = moves[state.moveIndex];
     state.board.position(move.fen, false);
@@ -1371,7 +1499,7 @@ function goToMove(idx) {
     updateEvalBar(move.eval_cp, move.eval_str);
     // Standard notation ("4. Nf3" / "4… Bxf3") — a bare "Move 4…" read as truncated text
     $('move-counter').textContent = `${move.move_num}${move.color === 'black' ? '…' : '.'} ${move.san}`;
-    highlightSquares(move.uci, move.cls);
+    scheduleBoardMarks(move.uci, move.cls);
     fen = move.fen;
   }
 
@@ -1521,11 +1649,18 @@ function applyEndGameKingHighlights() {
   }
 }
 
+/** Dark text on bright discs (yellow/lime); white on saturated reds/blues. */
+function clsBadgeContrast(cls) {
+  return (cls === "inaccuracy" || cls === "good" || cls === "book" || cls === "excellent")
+    ? "#110c07"
+    : "#ffffff";
+}
+
 function highlightSquares(uci, cls) {
   // Clear any existing highlight classes
   const classesToRemove = ["hl-king-win", "hl-king-lose", "hl-king-draw"];
   Object.keys(CLS).forEach(c => classesToRemove.push(`hl-${c}-from`, `hl-${c}-to`));
-  document.querySelectorAll("[class*='hl-']").forEach(el => {
+  document.querySelectorAll("#board [class*='hl-']").forEach(el => {
     classesToRemove.forEach(c => el.classList.remove(c));
   });
   document.querySelectorAll("#board .sq-badge").forEach(el => el.remove());
@@ -1538,23 +1673,36 @@ function highlightSquares(uci, cls) {
   if (fromEl) fromEl.classList.add(`hl-${cls}-from`);
   if (toEl)   toEl.classList.add(`hl-${cls}-to`);
 
-  // Classification emoji in the corner of the destination square
+  // Classification disc on the destination square — color + glyph match this move
   if (toEl && CLS[cls]) {
+    const info = CLS[cls];
     const badge = document.createElement("span");
-    badge.className = "sq-badge";
-    badge.textContent = CLS[cls].emoji;
-    badge.setAttribute("aria-hidden", "true");
-    badge.style.fontSize = Math.max(11, Math.round(toEl.offsetWidth * 0.22)) + "px";
+    badge.className = `sq-badge sq-badge--${cls}`;
+    badge.textContent = info.badge;
+    badge.setAttribute("role", "img");
+    badge.setAttribute("aria-label", info.label);
+    badge.style.background = info.color;
+    badge.style.color = clsBadgeContrast(cls);
+    badge.style.fontSize = Math.max(10, Math.round(toEl.offsetWidth * 0.20)) + "px";
     toEl.appendChild(badge);
   }
 }
 
+// Re-apply after chessboard.js finishes rebuilding square DOM (sync + 2 rAFs).
+function scheduleBoardMarks(uci, cls) {
+  highlightSquares(uci, cls);
+  requestAnimationFrame(() => {
+    highlightSquares(uci, cls);
+    requestAnimationFrame(() => highlightSquares(uci, cls));
+  });
+}
+
 // chessboard.js rebuilds every square on flip / resize, which drops the
-// highlight, the emoji badge and the arrows — put them back for the current move.
+// highlight, the judgement badge and the arrows — put them back for the current move.
 function refreshBoardMarks() {
   if (!state.result || !state.board) return;
   const move = getActiveMoves()[state.moveIndex];
-  highlightSquares(move ? move.uci : null, move ? move.cls : null);
+  scheduleBoardMarks(move ? move.uci : null, move ? move.cls : null);
   applyEndGameKingHighlights();
   drawReviewArrows();
 }

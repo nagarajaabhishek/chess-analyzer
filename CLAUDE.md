@@ -52,3 +52,19 @@ npx cap sync ios
 * **Framework-free**: The frontend UI is intentionally vanilla JS; do not introduce complex build tooling for layout tweaks.
 * **CORS Middleware**: Any new REST API route on the server must support CORS preflight and allowed origins to communicate with separate frontend client hosts in production.
 * **Mobile / WASM**: Test layout changes on mobile viewports as WebAssembly worker initializations have strict path rules on iOS.
+
+---
+
+## 🐘 Elephant-Goldfish Model (EGM)
+
+Spec-first design for non-trivial changes (especially ChessNow Voice). Full guide: [docs/egm.md](docs/egm.md).
+
+```text
+EGM artifact directory: .dev/docs
+EGM_ROOT: ~/.cursor/plugins/local/egm
+```
+
+* Scratch: `.dev/docs/` · Approved: `docs/designs/`
+* Reinstall Cursor package: `./scripts/setup-egm.sh`
+* Skills: `egm-brainstorm` → `egm-draft` → `egm-review` → human approve → implement
+* Goldfish reviews require fresh Task subagents; do not simulate reviewers in-parent
