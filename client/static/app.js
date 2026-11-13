@@ -104,6 +104,60 @@ function showView(id) {
     v.classList.toggle("hidden", v.id !== id);
     v.classList.toggle("active", v.id === id);
   });
+  if (id !== "view-analysis") setReviewing(false);
+}
+
+function setReviewing(on) {
+  document.getElementById("view-analysis")?.classList.toggle("is-reviewing", !!on);
+  document.body.classList.toggle("is-reviewing", !!on);
+  if (!on) closeNavDrawer();
+}
+
+function openNavDrawer() {
+  const drawer = $("nav-drawer");
+  const backdrop = $("nav-drawer-backdrop");
+  const btn = $("nav-sandwich");
+  if (!drawer) return;
+  drawer.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+  // Double rAF so the slide-in transition runs after display flips on
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => document.body.classList.add("nav-drawer-open"));
+  });
+  if (btn) btn.setAttribute("aria-expanded", "true");
+}
+
+function closeNavDrawer() {
+  const drawer = $("nav-drawer");
+  const backdrop = $("nav-drawer-backdrop");
+  const btn = $("nav-sandwich");
+  document.body.classList.remove("nav-drawer-open");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  // Wait for slide-out, then hide
+  window.setTimeout(() => {
+    if (document.body.classList.contains("nav-drawer-open")) return;
+    if (drawer) drawer.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+  }, 280);
+}
+
+function toggleNavDrawer() {
+  if (document.body.classList.contains("nav-drawer-open")) closeNavDrawer();
+  else openNavDrawer();
+}
+
+function initNavDrawer() {
+  $("nav-sandwich")?.addEventListener("click", toggleNavDrawer);
+  $("nav-drawer-close")?.addEventListener("click", closeNavDrawer);
+  $("nav-drawer-backdrop")?.addEventListener("click", closeNavDrawer);
+  document.querySelectorAll(".nav-drawer-link").forEach(link => {
+    link.addEventListener("click", () => closeNavDrawer());
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && document.body.classList.contains("nav-drawer-open")) {
+      closeNavDrawer();
+    }
+  });
 }
 
 // Function to load dynamic content without page reloads
@@ -187,8 +241,8 @@ function handleHashRouting() {
     "#voice-commands": "/guides/voice-commands"
   };
 
-  // Update active state visual indicators on header links
-  document.querySelectorAll(".nav-link").forEach(link => {
+  // Update active state visual indicators on header + drawer links
+  document.querySelectorAll(".nav-link, .nav-drawer-link").forEach(link => {
     const href = link.getAttribute("href");
     // Keep Analyze highlighted across the whole Analyzer flow
     const analyzeActive = href === "#analysis" && (
@@ -239,7 +293,7 @@ function handleHashRouting() {
     // Restore from memory, or from sessionStorage after a hard refresh
     if (state.currentGame || state.result || restoreActiveReview()) {
       showView("view-analysis");
-      document.getElementById("view-analysis")?.classList.add("is-reviewing");
+      setReviewing(true);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else if (state.games && state.games.length) {
       window.location.hash = "games";
@@ -333,16 +387,10 @@ async function loadGames() {
   }
 
   const btn = $("load-btn");
-  const refreshBtn = $("games-refresh");
 
   showHomeError("");
   btn.disabled = true;
   btn.querySelector(".btn-text").textContent = "Loading…";
-
-  if (refreshBtn) {
-    refreshBtn.disabled = true;
-    refreshBtn.textContent = "⟳ Loading…";
-  }
 
   try {
     // Always hit Chess.com from the browser for Analyzer (consistent offline-capable path)
@@ -367,14 +415,6 @@ async function loadGames() {
     $("header-username").textContent = `♟ ${username}`;
     $("header-username").classList.remove("hidden");
 
-    // Populate new profile button/tag on Games Listing page
-    const profileTag = $("games-profile-tag");
-    if (profileTag) {
-      profileTag.classList.remove("hidden");
-      $("games-profile-avatar").textContent = username[0]?.toUpperCase() || "?";
-      $("games-profile-name").textContent = username;
-    }
-
     renderGames(gamesList, username);
     showView("view-games");
   } catch (err) {
@@ -382,10 +422,6 @@ async function loadGames() {
   } finally {
     btn.disabled = false;
     btn.querySelector(".btn-text").textContent = "Load Games";
-    if (refreshBtn) {
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = "⟳ Refresh";
-    }
   }
 }
 
@@ -518,7 +554,7 @@ async function startAnalysis(game, opts = {}) {
     window.location.hash = "review";
   }
   showView("view-analysis");
-  document.getElementById("view-analysis")?.classList.remove("is-reviewing");
+  setReviewing(false);
   $("btn-main-line")?.classList.add("hidden");
   $("analysis-loading").classList.remove("hidden");
   $("analysis-result").classList.add("hidden");
@@ -608,7 +644,7 @@ function renderAnalysis(result) {
   $("analysis-load-error")?.classList.add("hidden");
   $("btn-cancel-analysis")?.classList.add("hidden");
   $("btn-analysis-error-back")?.classList.add("hidden");
-  document.getElementById("view-analysis")?.classList.add("is-reviewing");
+  setReviewing(true);
   const loadLabel = document.querySelector("#analysis-loading .loading-label");
   if (loadLabel) loadLabel.textContent = "Analysing with Stockfish…";
   const openingSidebar = $("meta-opening-sidebar");
@@ -2107,15 +2143,6 @@ $("logo-btn").addEventListener("click", () => {
 });
 
 // Games
-$("games-back").addEventListener("click", () => {
-  window.location.hash = "analysis";
-});
-$("games-refresh").addEventListener("click", loadGames);
-$("games-profile-tag").addEventListener("click", () => {
-  if (state.username) {
-    window.open(`https://www.chess.com/member/${state.username}`, "_blank");
-  }
-});
 document.querySelectorAll(".mode-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
@@ -2126,7 +2153,7 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 
 // Analysis
 function leaveAnalysisToGames() {
-  document.getElementById("view-analysis")?.classList.remove("is-reviewing");
+  setReviewing(false);
   // Prefer games list; fall back to Local Game Analyzer entry
   window.location.hash = state.games?.length ? "games" : "analysis";
 }
@@ -2623,17 +2650,28 @@ function initAnalyzerExtras() {
 }
 
 // ── Init ───────────────────────────────────────────────
-// Prefill username from the last successful Chess.com lookup in this browser
+// Prefill username: ?user=… query wins, else last successful Chess.com lookup
 try {
+  const params = new URLSearchParams(window.location.search);
+  const queryUser = (params.get("user") || params.get("username") || "").trim();
   const savedUser = localStorage.getItem(LAST_USERNAME_KEY);
-  if (savedUser && $("username-input")) {
-    $("username-input").value = savedUser;
+  const prefill = queryUser || savedUser;
+  if (prefill && $("username-input")) {
+    $("username-input").value = prefill;
+  }
+  // Deep-link: /?user=twelfth_doctor#analysis → load that player's games
+  if (queryUser) {
+    if (!window.location.hash || window.location.hash === "#home") {
+      window.location.hash = "analysis";
+    }
+    setTimeout(() => loadGames(), 0);
   }
 } catch (_) {}
 initPhoneAuth();
 initVoiceCall();
 initLandingPageListeners();
 initAnalyzerExtras();
+initNavDrawer();
 $("btn-mobile-show-best")?.classList.toggle("active", !!state.showBestArrow);
 $("chk-show-arrows") && ($("chk-show-arrows").checked = true);
 

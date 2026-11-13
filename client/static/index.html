@@ -247,6 +247,29 @@
   </nav>
 </header>
 
+<!-- Review-mode sandwich menu (left edge) -->
+<button type="button" id="nav-sandwich" class="nav-sandwich" aria-label="Open menu" aria-controls="nav-drawer" aria-expanded="false">
+  <span class="nav-sandwich-bars" aria-hidden="true"></span>
+</button>
+<div id="nav-drawer-backdrop" class="nav-drawer-backdrop" hidden></div>
+<aside id="nav-drawer" class="nav-drawer" role="dialog" aria-modal="true" aria-label="Main menu" hidden>
+  <div class="nav-drawer-top">
+    <div class="nav-drawer-brand">
+      <span class="logo-icon" aria-hidden="true">♟</span>
+      <span class="logo-text">ChessNow</span>
+    </div>
+    <button type="button" id="nav-drawer-close" class="nav-drawer-close" aria-label="Close menu">×</button>
+  </div>
+  <nav class="nav-drawer-links" aria-label="Main">
+    <a href="#home" class="nav-drawer-link">Home</a>
+    <a href="#play" class="nav-drawer-link">Play Lobby</a>
+    <a href="#analysis" class="nav-drawer-link">Analyze</a>
+    <a href="#faq" class="nav-drawer-link">FAQ</a>
+    <a href="#voice-commands" class="nav-drawer-link">Voice Guide</a>
+    <a href="#about" class="nav-drawer-link">About</a>
+  </nav>
+</aside>
+
 <main id="main-content">
 <!-- ── VIEW: HOME ── -->
 <div id="view-home" class="view active">
@@ -556,14 +579,6 @@
 ═══════════════════════════════════════════ -->
 <div id="view-games" class="view hidden">
   <div class="page-header">
-    <div class="header-top-row">
-      <button class="back-btn" id="games-back">← Back</button>
-      <button class="back-btn" id="games-refresh">⟳ Refresh</button>
-      <div class="profile-tag hidden" id="games-profile-tag">
-        <span class="profile-avatar" id="games-profile-avatar">?</span>
-        <span class="profile-username" id="games-profile-name"></span>
-      </div>
-    </div>
     <div>
       <h2 id="games-title">Recent Games</h2>
       <p id="games-sub" class="page-sub"></p>

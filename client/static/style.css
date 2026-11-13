@@ -156,6 +156,151 @@ body {
   white-space: nowrap;
 }
 
+/* ── Review sandwich menu (left) ── */
+.nav-sandwich {
+  display: none;
+  position: fixed;
+  top: calc(12px + var(--safe-top));
+  left: 12px;
+  z-index: 220;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border-2);
+  background: rgba(28, 20, 12, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+  transition: background 0.2s, border-color 0.2s;
+}
+.nav-sandwich:hover {
+  border-color: var(--accent);
+  background: rgba(36, 26, 15, 0.96);
+}
+.nav-sandwich-bars,
+.nav-sandwich-bars::before,
+.nav-sandwich-bars::after {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 1px;
+  position: relative;
+  transition: transform 0.2s, opacity 0.2s;
+}
+.nav-sandwich-bars::before,
+.nav-sandwich-bars::after {
+  content: "";
+  position: absolute;
+  left: 0;
+}
+.nav-sandwich-bars::before { top: -6px; }
+.nav-sandwich-bars::after  { top: 6px; }
+body.nav-drawer-open .nav-sandwich-bars { background: transparent; }
+body.nav-drawer-open .nav-sandwich-bars::before { top: 0; transform: rotate(45deg); }
+body.nav-drawer-open .nav-sandwich-bars::after  { top: 0; transform: rotate(-45deg); }
+
+.nav-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  background: rgba(8, 5, 2, 0.55);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.nav-drawer-backdrop[hidden] { display: none !important; }
+
+.nav-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 240;
+  width: min(300px, 86vw);
+  height: 100%;
+  height: 100dvh;
+  background: linear-gradient(180deg, #1c140c 0%, #110c07 100%);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  padding: calc(16px + var(--safe-top)) 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  transform: translateX(-105%);
+  transition: transform 0.28s ease;
+}
+.nav-drawer:not([hidden]) { display: flex; }
+body.nav-drawer-open .nav-drawer {
+  transform: translateX(0);
+}
+.nav-drawer[hidden] { display: none !important; }
+
+.nav-drawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nav-drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nav-drawer-close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav-drawer-close:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+
+.nav-drawer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nav-drawer-link {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-drawer-link:hover,
+.nav-drawer-link.active-link {
+  color: var(--text);
+  background: rgba(212, 160, 85, 0.12);
+}
+.nav-drawer-link.active-link {
+  color: var(--accent);
+}
+
+/* During game review: collapse top nav into left sandwich */
+body.is-reviewing .header {
+  display: none !important;
+}
+body.is-reviewing .nav-sandwich {
+  display: flex;
+}
+body.is-reviewing #view-analysis {
+  padding-top: calc(8px + var(--safe-top));
+}
+body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
+  display: none;
+}
+
 /* ═══════════════════════════════════════════════════════
    VIEWS
 ═══════════════════════════════════════════════════════ */
