@@ -158,8 +158,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 
-  <!-- chessboard.js -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css"/>
+  <!-- chessboard.js (self-hosted) -->
+  <link rel="stylesheet" href="/js/vendor/chessboard-1.0.0.min.css"/>
 
   <link rel="stylesheet" href="style.css"/>
 </head>
@@ -256,8 +256,8 @@
     <div class="hero-glow"></div>
     <div class="hero-content">
       <div class="hero-logo-group">
-        <span class="hero-logo-icon">📞</span>
-        <span class="hero-logo-text">Voice Chess</span>
+        <span class="hero-logo-icon" aria-hidden="true">♟</span>
+        <span class="hero-logo-text">ChessNow</span>
       </div>
       
       <h1 class="hero-title">Call and Play Chess</h1>
@@ -266,14 +266,14 @@
       <!-- Interactive Phone Section (Moved below tagline & reformatted) -->
       <div class="phone-display-section">
         <div class="phone-label-small">📞 Dial Hotline:</div>
-        <div class="phone-row-main" style="position: relative;">
+        <div class="phone-row-main">
           <a href="tel:+14243776693" id="btn-dial-phone" class="phone-link" title="Click to Call & Copy Number">+1-(4-CHESSNOW-3)</a>
           <span id="phone-copy-tooltip" class="phone-tooltip-bubble">Copied to clipboard!</span>
         </div>
         <div class="phone-sub-display" id="phone-number-display">+1 (424) 377-6693</div>
       </div>
       
-      <p class="hero-sub" style="margin-top: 24px;">Play hands-free chess against our AI companion Thara or challenge friends over a phone call.</p>
+      <p class="hero-sub">Play hands-free chess against our AI companion Thara or challenge friends over a phone call.</p>
       
       <!-- Action Buttons Row -->
       <div class="hero-buttons">
@@ -439,12 +439,12 @@
       <div class="analysis-card-wrap">
         <div class="search-card">
           <h3 class="search-card-title">Analyze Chess.com Profile</h3>
-          <p class="search-card-sub">Run Stockfish 18 locally in your browser — zero cloud footprint.</p>
+          <p class="search-card-sub">Run Stockfish 19 locally in your browser — zero cloud footprint.</p>
           <div class="search-row">
             <div class="input-wrap">
               <span class="input-icon">♙</span>
               <label for="username-input" class="sr-only">Chess.com username</label>
-              <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="off" spellcheck="false"/>
+              <input id="username-input" type="text" placeholder="Chess.com username" autocomplete="username" spellcheck="false"/>
             </div>
             <button id="load-btn" class="btn btn-primary">
               <span class="btn-text">Load Games</span>
@@ -452,6 +452,24 @@
             </button>
           </div>
           <div id="home-error" class="inline-error hidden"></div>
+        </div>
+
+        <div class="search-card" style="margin-top:16px;">
+          <h3 class="search-card-title">Or paste a PGN</h3>
+          <p class="search-card-sub">Lichess, Chess.com export, or OTB scoresheet — analysed entirely in your browser.</p>
+          <label for="pgn-input" class="sr-only">PGN text</label>
+          <textarea id="pgn-input" class="pgn-input" rows="5" placeholder="[Event &quot;…&quot;]&#10;1. e4 e5 2. Nf3 …"></textarea>
+          <div class="search-row" style="margin-top:10px; gap:8px;">
+            <label class="btn btn-ghost" style="cursor:pointer; margin:0;">
+              Upload .pgn
+              <input type="file" id="pgn-file" accept=".pgn,text/plain" hidden />
+            </label>
+            <button id="pgn-analyze-btn" class="btn btn-primary" type="button">
+              <span class="btn-text">Analyze PGN</span>
+              <span class="btn-arrow">→</span>
+            </button>
+          </div>
+          <div id="pgn-error" class="inline-error hidden"></div>
         </div>
       </div>
       
@@ -614,21 +632,27 @@
 ═══════════════════════════════════════════ -->
 <div id="view-analysis" class="view hidden">
 
-  <!-- Top bar: back button inline with opening name -->
-  <div class="analysis-topbar">
+  <!-- Top bar (used mainly while loading; result view uses sidebar header) -->
+  <div class="analysis-topbar" id="analysis-topbar">
     <button class="back-btn" id="analysis-back">← Games</button>
     <span id="meta-opening" class="meta-opening"></span>
   </div>
 
   <!-- Loading state -->
   <div id="analysis-loading" class="loading-screen">
-    <div class="loading-board-ghost"></div>
-    <div class="loading-info">
-      <div class="spinner"></div>
-      <div class="loading-label">Analysing with Stockfish…</div>
-      <div id="loading-progress" class="loading-progress">0 / 0 moves</div>
-      <div class="progress-bar-wrap">
-        <div id="progress-bar" class="progress-bar"></div>
+    <div class="loading-panel">
+      <div class="loading-board-ghost" aria-hidden="true"></div>
+      <div class="loading-info">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="loading-label">Analysing with Stockfish…</div>
+        <div id="loading-meta" class="loading-meta">Stockfish 19 · local WASM</div>
+        <div id="loading-progress" class="loading-progress">Starting…</div>
+        <div class="progress-bar-wrap">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="analysis-load-error" class="inline-error hidden"></p>
+        <button type="button" id="btn-cancel-analysis" class="btn btn-ghost">Cancel</button>
+        <button type="button" id="btn-analysis-error-back" class="btn btn-primary hidden">← Back to games</button>
       </div>
     </div>
   </div>
@@ -660,8 +684,8 @@
         </div>
       </div>
 
-      <!-- Mobile Chess Coach speech bubble -->
-      <div id="coach-panel" class="coach-panel hidden">
+      <!-- Mobile-only coach (desktop coach lives in the sidebar like Chess.com) -->
+      <div id="coach-panel" class="coach-panel coach-panel--mobile hidden">
         <div class="coach-avatar">👨🏻‍💼</div>
         <div class="coach-bubble">
           <div class="coach-header">
@@ -711,16 +735,6 @@
         <button class="ctrl-btn-mobile" id="btn-mobile-next" title="Next Move">▶</button>
       </div>
 
-      <!-- Controls (Desktop) -->
-      <div class="board-controls" id="desktop-board-controls">
-        <button class="ctrl-btn" id="btn-first" title="First move">⏮</button>
-        <button class="ctrl-btn" id="btn-prev"  title="Previous">◀</button>
-        <span id="move-counter" class="move-counter">Start</span>
-        <button class="ctrl-btn" id="btn-next"  title="Next">▶</button>
-        <button class="ctrl-btn" id="btn-last"  title="Last move">⏭</button>
-        <button class="ctrl-btn" id="btn-flip"  title="Flip board">⟳</button>
-        <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">📞</button>
-      </div>
       <button id="btn-main-line" class="main-line-btn hidden" title="Return to main game line">↩ Back to main line</button>
 
       <!-- Mobile Bottom Actions bar -->
@@ -781,11 +795,38 @@
       </div>
     </div>
 
-    <!-- RIGHT: Unified Sidebar (Chess.com Style) -->
+    <!-- RIGHT: Game Review sidebar (Chess.com-inspired) -->
     <div class="right-col">
       <div class="sidebar-container">
-        
-        <!-- Sidebar Navigation Tabs -->
+
+        <div class="sidebar-header">
+          <div class="sidebar-header-row">
+            <button type="button" class="sidebar-back" id="analysis-back-sidebar" aria-label="Back to games">←</button>
+            <div class="sidebar-header-title">Game Review</div>
+          </div>
+          <div id="meta-opening-sidebar" class="sidebar-opening"></div>
+        </div>
+
+        <div id="cache-banner" class="cache-banner hidden" role="status">
+          <span class="cache-banner-text">Cached review from this browser.</span>
+          <div class="cache-banner-actions">
+            <button type="button" id="btn-reanalyze" class="btn btn-ghost btn-small">Re-analyse</button>
+            <button type="button" id="btn-dismiss-cache" class="cache-banner-close" aria-label="Dismiss">×</button>
+          </div>
+        </div>
+
+        <!-- Desktop coach commentary (mirrors Chess.com speech bubble placement) -->
+        <div id="coach-panel-sidebar" class="coach-panel coach-panel--sidebar hidden">
+          <div class="coach-avatar">👨🏻‍💼</div>
+          <div class="coach-bubble">
+            <div class="coach-header">
+              <span id="coach-move-badge-sidebar" class="coach-badge"></span>
+              <span id="coach-move-title-sidebar" class="coach-title">Game Review</span>
+            </div>
+            <div id="coach-text-sidebar" class="coach-text">Select a move to begin analysis.</div>
+          </div>
+        </div>
+
         <div class="sidebar-tabs">
           <button class="sidebar-tab active" data-tab="moves">Moves</button>
           <button class="sidebar-tab" data-tab="review">Review</button>
@@ -796,10 +837,9 @@
           <div class="moves-list-wrap">
             <div id="moves-list" class="moves-list"></div>
           </div>
-          <!-- Live Engine Lines -->
           <div class="live-engine-panel">
             <div class="engine-panel-header">
-              <span class="engine-title">Local Stockfish 18</span>
+              <span class="engine-title">Local Stockfish 19</span>
               <label class="toggle-arrows-lbl">
                 <input type="checkbox" id="chk-show-arrows" checked> Show Arrows
               </label>
@@ -808,19 +848,19 @@
               <div class="engine-line-item empty">Loading evaluation...</div>
             </div>
           </div>
-          <!-- Big Green Game Review Action Button -->
-          <div class="game-review-action">
-            <div class="desktop-summary-pills hidden" id="desktop-summary-pills"></div>
-            <button id="btn-trigger-review" class="btn btn-review">
-              <span class="review-icon">★</span> Game Review
-            </button>
-          </div>
         </div>
 
         <!-- TAB CONTENT: REVIEW -->
         <div class="tab-content hidden" id="tab-review">
           <div class="review-scroll-container">
-            <!-- Accuracy Rows -->
+            <div class="desktop-summary-pills hidden" id="desktop-summary-pills"></div>
+            <div class="jump-filters" id="jump-filters" aria-label="Jump to key moments">
+              <button type="button" class="jump-chip" data-jump="brilliant">Brilliant</button>
+              <button type="button" class="jump-chip" data-jump="great">Great</button>
+              <button type="button" class="jump-chip" data-jump="miss">Miss</button>
+              <button type="button" class="jump-chip" data-jump="mistake">Mistake</button>
+              <button type="button" class="jump-chip" data-jump="blunder">Blunder</button>
+            </div>
             <div class="accuracy-row-vertical">
               <div class="acc-card-vertical" id="acc-card-white">
                 <div class="acc-card-header">
@@ -843,8 +883,6 @@
                 <div class="cls-breakdown" id="cls-black"></div>
               </div>
             </div>
-
-            <!-- Chart -->
             <div class="chart-section">
               <div class="chart-label">Win Probability</div>
               <div class="chart-wrap">
@@ -854,8 +892,16 @@
           </div>
         </div>
 
-        <!-- Games tab removed — bot selector, PvP challenge, and game history
-             have been moved to the top-level view-games page where they belong. -->
+        <!-- Playback controls pinned to sidebar bottom (Chess.com pattern) -->
+        <div class="sidebar-controls" id="desktop-board-controls">
+          <button class="ctrl-btn" id="btn-first" title="First move">⏮</button>
+          <button class="ctrl-btn" id="btn-prev"  title="Previous">◀</button>
+          <span id="move-counter" class="move-counter">Start</span>
+          <button class="ctrl-btn" id="btn-next"  title="Next">▶</button>
+          <button class="ctrl-btn" id="btn-last"  title="Last move">⏭</button>
+          <button class="ctrl-btn" id="btn-flip"  title="Flip board">⟳</button>
+          <button class="ctrl-btn btn-call" id="btn-desktop-call" title="Call Chess Coach / Bot (uses cloud speech recognition, not local)">📞</button>
+        </div>
 
       </div>
     </div>
@@ -926,10 +972,11 @@
 </main>
 
 <!-- Scripts -->
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="app.js"></script>
+<script src="/js/vendor/jquery-3.7.1.min.js"></script>
+<script src="/js/vendor/chess.min.js"></script>
+<script src="/js/vendor/chessboard-1.0.0.min.js"></script>
+<script src="/js/vendor/chart.umd.min.js"></script>
+<script src="/js/review-math.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

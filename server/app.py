@@ -233,29 +233,56 @@ def win_prob(cp_white):
     return round(50 + 50 * (2 / (1 + math.exp(-0.00368208 * cp_white)) - 1), 1)
 
 
-def classify(cpl, is_best):
-    """Return move classification string from centipawn loss."""
+def _move_accuracy_from_win_percents(before_wp, after_wp):
+    """Lichess-style per-move accuracy from mover win% before → after."""
+    if after_wp >= before_wp:
+        return 100.0
+    win_diff = before_wp - after_wp
+    raw = 103.1668100711649 * math.exp(-0.04354415386753951 * win_diff) - 3.166924740191411
+    return max(0.0, min(100.0, raw))
+
+
+def classify(cpl, is_best, before_wp=None, after_wp=None):
+    """Classify a move. Prefer win%-delta when provided (matches client ReviewMath)."""
+    if before_wp is not None and after_wp is not None:
+        drop = before_wp - after_wp
+        if is_best or drop <= 0.5:
+            return "best"
+        if drop <= 2:
+            return "excellent"
+        if drop <= 5:
+            return "good"
+        if drop <= 10:
+            return "inaccuracy"
+        if drop <= 20:
+            return "mistake"
+        return "blunder"
     if is_best or cpl <= 5:
         return "best"
-    elif cpl <= 20:
+    if cpl <= 20:
         return "excellent"
-    elif cpl <= 50:
+    if cpl <= 50:
         return "good"
-    elif cpl <= 100:
+    if cpl <= 100:
         return "inaccuracy"
-    elif cpl <= 200:
+    if cpl <= 200:
         return "mistake"
-    else:
-        return "blunder"
+    return "blunder"
 
 
 def accuracy(cpls):
-    """Accuracy % from centipawn losses. 0 CPL → 100%, ~100 CPL → 78%, ~200 CPL → 61%."""
+    """Legacy CPL accuracy (fallback). Prefer accuracy_from_move_accs when available."""
     if not cpls:
         return 100.0
     avg = sum(cpls) / len(cpls)
     acc = 100.0 * math.exp(-avg / 400.0)
     return round(max(0.0, min(100.0, acc)), 1)
+
+
+def accuracy_from_move_accs(accs):
+    if not accs:
+        return 100.0
+    return round(max(0.0, min(100.0, sum(accs) / len(accs))), 1)
 
 
 def eval_str(score_pov_white):
@@ -304,6 +331,7 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
 
             # Analyse starting position
             info = engine.analyse(board, limit, multipv=1)
+            white_accs, black_accs = [], []
 
             while node.variations:
                 next_node = node.variation(0)
@@ -324,6 +352,8 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
                 best_move = pv_moves[0] if has_pv else move
                 best_san = board.san(best_move)
                 score_before_rel = get_cp(info[0]["score"].relative)
+                score_before_white = get_cp(info[0]["score"].white())
+                before_wp = win_prob(score_before_white) if white_to_move else 100.0 - win_prob(score_before_white)
 
                 # ── Make the move ────────────────────────────
                 san = board.san(move)
@@ -334,6 +364,7 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
                 score_after_rel = get_cp(info[0]["score"].relative)
                 score_white_pov = info[0]["score"].white()
                 eval_white_cp = get_cp(score_white_pov)
+                after_wp = win_prob(eval_white_cp) if white_to_move else 100.0 - win_prob(eval_white_cp)
 
                 # CPL (from the mover's perspective)
                 eval_after_mover = -score_after_rel   # negate: opponent now to move
@@ -341,39 +372,46 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
                 cpl = min(cpl, 1000)
 
                 is_best = has_pv and move == best_move
-                cls = classify(cpl, is_best)
+                cls = classify(cpl, is_best, before_wp=before_wp, after_wp=after_wp)
                 wp = win_prob(eval_white_cp)
+                move_acc = _move_accuracy_from_win_percents(before_wp, after_wp)
 
                 if white_to_move:
-                    white_cpls.append(min(cpl, 300))   # cap per-move CPL at 300
+                    white_cpls.append(min(cpl, 300))
+                    white_accs.append(move_acc)
                 else:
                     black_cpls.append(min(cpl, 300))
+                    black_accs.append(move_acc)
 
                 idx += 1
                 task["progress"] = int(idx / total * 100)
 
                 moves_data.append({
-                    "idx":         idx,
-                    "move_num":    (idx + 1) // 2,
-                    "san":         san,
-                    "uci":         move.uci(),
-                    "color":       "white" if white_to_move else "black",
-                    "fen":         board.fen(),
-                    "eval_cp":     eval_white_cp,
-                    "eval_str":    eval_str(score_white_pov),
-                    "cpl":         round(cpl),
-                    "cls":         cls,
-                    "win_prob":    wp,
-                    "is_best":     is_best,
-                    "best_uci":    best_move.uci() if (has_pv and not is_best) else None,
-                    "best_san":    best_san if (has_pv and not is_best) else None,
-                    "clk":         clk,
-                    "variations":  [],
+                    "idx":           idx,
+                    "move_num":      (idx + 1) // 2,
+                    "san":           san,
+                    "uci":           move.uci(),
+                    "color":         "white" if white_to_move else "black",
+                    "fen":           board.fen(),
+                    "eval_cp":       eval_white_cp,
+                    "eval_str":      eval_str(score_white_pov),
+                    "cpl":           round(cpl),
+                    "cls":           cls,
+                    "win_prob":      wp,
+                    "move_accuracy": round(move_acc, 1),
+                    "is_best":       is_best,
+                    "best_uci":      best_move.uci() if (has_pv and not is_best) else None,
+                    "best_san":      best_san if (has_pv and not is_best) else None,
+                    "clk":           clk,
+                    "variations":    [],
                 })
                 node = next_node
 
         def counts(color):
-            c = {k: 0 for k in ["best", "excellent", "good", "inaccuracy", "mistake", "blunder"]}
+            c = {k: 0 for k in [
+                "brilliant", "great", "best", "excellent", "good",
+                "inaccuracy", "mistake", "miss", "blunder",
+            ]}
             for m in moves_data:
                 if m["color"] == color and m["cls"] in c:
                     c[m["cls"]] += 1
@@ -383,8 +421,8 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
             "white_player":   white_player,
             "black_player":   black_player,
             "opening":        opening,
-            "white_accuracy": accuracy(white_cpls),
-            "black_accuracy": accuracy(black_cpls),
+            "white_accuracy": accuracy_from_move_accs(white_accs),
+            "black_accuracy": accuracy_from_move_accs(black_accs),
             "white_counts":   counts("white"),
             "black_counts":   counts("black"),
             "moves":          moves_data,
@@ -411,8 +449,8 @@ def run_analysis(task_id, pgn_text, username, time_per_move, cache_key=None, pho
                             white_player=white_player,
                             black_player=black_player,
                             pgn=pgn_text,
-                            white_accuracy=accuracy(white_cpls),
-                            black_accuracy=accuracy(black_cpls),
+                            white_accuracy=accuracy_from_move_accs(white_accs),
+                            black_accuracy=accuracy_from_move_accs(black_accs),
                             opening=opening,
                             result=game.headers.get("Result", "*")
                         )

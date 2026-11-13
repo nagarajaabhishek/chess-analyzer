@@ -24,20 +24,78 @@ const state = {
   // Variation navigation
   currentVariationPath: [],
   lastRenderedPathStr: null,
-  showBestArrow: false,
+  showBestArrow: true,  // show best-move arrow on mistakes by default
+  fromCache: false,
+  forceReanalyze: false,
 };
 
-let useLocalWasm = false;
+let useLocalWasm = true;   // Analyzer-first: always prefer in-browser Stockfish WASM
 let hasBackend = false;
+let analysisAbort = { cancelled: false };
+const LAST_USERNAME_KEY = "chesscom_last_user";
+const ACTIVE_REVIEW_KEY = "chessnow_active_review";
 
-// Classification display config
+function persistActiveReview() {
+  if (!state.currentGame) return;
+  const payload = {
+    game: state.currentGame,
+    username: state.username,
+    analysisMode: state.analysisMode,
+    fromCache: !!state.fromCache,
+    moveIndex: state.moveIndex,
+    result: state.result,
+  };
+  try {
+    sessionStorage.setItem(ACTIVE_REVIEW_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // Result payloads can exceed quota — keep enough to re-open via analysis cache.
+    try {
+      delete payload.result;
+      sessionStorage.setItem(ACTIVE_REVIEW_KEY, JSON.stringify(payload));
+    } catch (_) {}
+  }
+}
+
+function restoreActiveReview() {
+  let data = null;
+  try {
+    data = JSON.parse(sessionStorage.getItem(ACTIVE_REVIEW_KEY) || "null");
+  } catch (_) {
+    return false;
+  }
+  if (!data?.game) return false;
+
+  state.currentGame = data.game;
+  if (data.username) state.username = data.username;
+  if (data.analysisMode) state.analysisMode = data.analysisMode;
+  state.fromCache = !!data.fromCache;
+
+  if (data.result) {
+    state.result = data.result;
+    renderAnalysis(data.result);
+    if (typeof data.moveIndex === "number" && data.moveIndex >= -1) {
+      requestAnimationFrame(() => goToMove(data.moveIndex));
+    }
+    return true;
+  }
+
+  // No saved result — restart analysis (hits local review cache when available).
+  startAnalysis(data.game);
+  return true;
+}
+
+// Classification display config (win%-based labels + Chess.com-style extras)
 const CLS = {
-  best:       { label: "Best",       color: "#22c55e", symbol: "✓" },
-  excellent:  { label: "Excellent",  color: "#4ade80", symbol: "✓" },
-  good:       { label: "Good",       color: "#a3e635", symbol: "·" },
-  inaccuracy: { label: "Inaccuracy", color: "#fbbf24", symbol: "?!" },
-  mistake:    { label: "Mistake",    color: "#f97316", symbol: "?" },
-  blunder:    { label: "Blunder",    color: "#ef4444", symbol: "??" },
+  brilliant:  { label: "Brilliant",  color: "#22d3ee", symbol: "!!", badge: "!!" },
+  great:      { label: "Great",      color: "#38bdf8", symbol: "!",  badge: "!" },
+  best:       { label: "Best",       color: "#22c55e", symbol: "✓",  badge: "★" },
+  excellent:  { label: "Excellent",  color: "#4ade80", symbol: "✓",  badge: "✓" },
+  good:       { label: "Good",       color: "#a3e635", symbol: "·",  badge: "·" },
+  book:       { label: "Book",       color: "#a3e635", symbol: "📖", badge: "📖" },
+  inaccuracy: { label: "Inaccuracy", color: "#fbbf24", symbol: "?!", badge: "?!" },
+  mistake:    { label: "Mistake",    color: "#f97316", symbol: "?",  badge: "?" },
+  miss:       { label: "Miss",       color: "#e879f9", symbol: "✖",  badge: "✖" },
+  blunder:    { label: "Blunder",    color: "#ef4444", symbol: "??", badge: "??" },
 };
 
 // ── View helpers ───────────────────────────────────────
@@ -132,7 +190,20 @@ function handleHashRouting() {
   // Update active state visual indicators on header links
   document.querySelectorAll(".nav-link").forEach(link => {
     const href = link.getAttribute("href");
-    link.classList.toggle("active-link", href === hash || (hash === "" && href === "#home") || (hash === "#home" && href === "#home"));
+    // Keep Analyze highlighted across the whole Analyzer flow
+    const analyzeActive = href === "#analysis" && (
+      hash === "#analysis" ||
+      hash === "#section-analysis" ||
+      hash === "#games" ||
+      hash === "#review"
+    );
+    link.classList.toggle(
+      "active-link",
+      analyzeActive ||
+      href === hash ||
+      (hash === "" && href === "#home") ||
+      (hash === "#home" && href === "#home")
+    );
   });
 
   if (hashRoutes[hash]) {
@@ -143,12 +214,38 @@ function handleHashRouting() {
   } else if (hash === "#play") {
     showView("view-play");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  } else if (hash === "#analysis") {
-    showView("view-analysis");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (hash === "#analysis" || hash === "#section-analysis") {
+    // Nav "Analyze" → Local Game Analyzer (username → game list), not the empty board view
+    showView("view-home");
+    requestAnimationFrame(() => {
+      const target = $("section-analysis");
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      const input = $("username-input");
+      if (input) {
+        setTimeout(() => input.focus({ preventScroll: true }), 350);
+      }
+    });
   } else if (hash === "#games") {
-    showView("view-games");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (state.games && state.games.length) {
+      showView("view-games");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      // No list in memory (refresh / deep link) → Local Game Analyzer
+      window.location.hash = "analysis";
+    }
+  } else if (hash === "#review") {
+    // Restore from memory, or from sessionStorage after a hard refresh
+    if (state.currentGame || state.result || restoreActiveReview()) {
+      showView("view-analysis");
+      document.getElementById("view-analysis")?.classList.add("is-reviewing");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else if (state.games && state.games.length) {
+      window.location.hash = "games";
+    } else {
+      window.location.hash = "analysis";
+    }
   } else if (hash === "#home" || !hash) {
     showView("view-home");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -191,61 +288,81 @@ async function customFetch(url) {
 
 async function checkStockfish() {
   const badge = $("sf-status");
-  badge.classList.remove("hidden");
+  if (badge) badge.classList.remove("hidden");
+  // Analyzer always uses WASM so web / iOS / Flask-dev all share one review path.
+  useLocalWasm = true;
   try {
     const res = await fetch("/api/check");
-    const data = await res.json();
-    hasBackend = true;
-    if (data.ok) {
-      useLocalWasm = false;
-      badge.className = "sf-badge ok";
-      badge.textContent = "✅  Stockfish ready (Local C++)";
-    } else {
-      useLocalWasm = true;
-      badge.className = "sf-badge ok";
-      badge.textContent = "✅  Stockfish ready (Local WebAssembly)";
-    }
+    hasBackend = res.ok;
   } catch (_) {
     hasBackend = false;
-    useLocalWasm = true;
-    badge.className = "sf-badge ok";
-    badge.textContent = "✅  Stockfish ready (Local WebAssembly)";
   }
+  if (badge) {
+    badge.className = "sf-badge ok";
+    badge.textContent = "✅  Stockfish 19 ready (Local WebAssembly)";
+  }
+}
+
+function showHomeError(msg) {
+  const errEl = $("home-error");
+  if (!errEl) return;
+  if (!msg) {
+    errEl.classList.add("hidden");
+    errEl.textContent = "";
+    return;
+  }
+  errEl.textContent = msg;
+  errEl.classList.remove("hidden");
+}
+
+function openSidebarTab(tabName) {
+  const tab = document.querySelector(`.sidebar-tab[data-tab="${tabName}"]`);
+  if (tab) tab.click();
+}
+
+function setAnalysisLoadingMeta(modeLabel) {
+  const meta = $("loading-meta");
+  if (meta) meta.textContent = modeLabel || "";
 }
 
 async function loadGames() {
   const username = $("username-input").value.trim();
-  if (!username) return;
+  if (!username) {
+    showHomeError("Enter a Chess.com username to load games.");
+    return;
+  }
 
   const btn = $("load-btn");
   const refreshBtn = $("games-refresh");
-  const errEl = $("home-error");
-  
-  errEl.classList.add("hidden");
+
+  showHomeError("");
   btn.disabled = true;
   btn.querySelector(".btn-text").textContent = "Loading…";
-  
+
   if (refreshBtn) {
     refreshBtn.disabled = true;
     refreshBtn.textContent = "⟳ Loading…";
   }
 
   try {
-    let gamesList = [];
-    if (hasBackend) {
-      const res = await fetch(`/api/games/${encodeURIComponent(username)}`);
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "Failed to load games");
-      }
-      gamesList = data.games;
-    } else {
-      // Fetch directly from Chess.com public API in browser/Capacitor
-      gamesList = await fetchGamesDirect(username, 20);
+    // Always hit Chess.com from the browser for Analyzer (consistent offline-capable path)
+    const gamesList = await fetchGamesDirect(username, 20);
+
+    if (!gamesList.length) {
+      throw new Error("No recent games found for this user.");
     }
 
     state.username = username;
     state.games = gamesList;
+
+    try {
+      localStorage.setItem(LAST_USERNAME_KEY, username);
+    } catch (_) {}
+
+    // Push #games so browser Back from a review can return here
+    if (window.location.hash !== "#games") {
+      window.location.hash = "games";
+    }
 
     $("header-username").textContent = `♟ ${username}`;
     $("header-username").classList.remove("hidden");
@@ -261,8 +378,7 @@ async function loadGames() {
     renderGames(gamesList, username);
     showView("view-games");
   } catch (err) {
-    errEl.textContent = err.message;
-    errEl.classList.remove("hidden");
+    showHomeError(err.message || "Could not load games.");
   } finally {
     btn.disabled = false;
     btn.querySelector(".btn-text").textContent = "Load Games";
@@ -387,47 +503,70 @@ function renderGames(games, username) {
 // ANALYSIS VIEW — initiation & polling
 // ══════════════════════════════════════════════════════
 
-async function startAnalysis(game) {
+async function startAnalysis(game, opts = {}) {
   state.currentGame = game;
+  persistActiveReview();
   state.result = null;
   state.moveIndex = -1;
   state.currentVariation = null;
+  analysisAbort = { cancelled: false };
+  state.fromCache = false;
+  state.forceReanalyze = !!opts.forceReanalyze;
 
+  // Push #review on top of #games so browser Back returns to the games list
+  if (window.location.hash !== "#review") {
+    window.location.hash = "review";
+  }
   showView("view-analysis");
-  $("btn-main-line").classList.add("hidden");
+  document.getElementById("view-analysis")?.classList.remove("is-reviewing");
+  $("btn-main-line")?.classList.add("hidden");
   $("analysis-loading").classList.remove("hidden");
   $("analysis-result").classList.add("hidden");
-  $("meta-opening").textContent = game.opening;
+  $("cache-banner")?.classList.add("hidden");
+  const openingLabel = game.opening || "Game review";
+  $("meta-opening").textContent = openingLabel;
+  const openingSidebar = $("meta-opening-sidebar");
+  if (openingSidebar) openingSidebar.textContent = openingLabel;
   $("progress-bar").style.width = "0%";
+  const mode = state.analysisMode || "normal";
   $("loading-progress").textContent = "Starting…";
-
-  if (useLocalWasm) {
-    try {
-      await runLocalWasmAnalysis(game);
-    } catch (err) {
-      alert("Local WebAssembly Analysis failed: " + err.message);
-      showView("view-games");
-    }
-    return;
-  }
+  setAnalysisLoadingMeta(`Stockfish 19 · ${mode} · local WASM`);
+  const cancelBtn = $("btn-cancel-analysis");
+  if (cancelBtn) cancelBtn.classList.remove("hidden");
 
   try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pgn:      game.pgn,
-        username: state.username,
-        mode:     state.analysisMode,
-        url:      game.url,
-      })
-    });
-    const { task_id, error } = await res.json();
-    if (error) throw new Error(error);
-    pollAnalysis(task_id);
+    await runLocalWasmAnalysis(game);
   } catch (err) {
-    alert("Error starting analysis: " + err.message);
+    if (analysisAbort.cancelled || err?.message === "cancelled") {
+      window.location.hash = state.games?.length ? "games" : "analysis";
+      return;
+    }
+    showAnalysisFatalError(err.message || "Analysis failed");
   }
+}
+
+function showAnalysisFatalError(message) {
+  $("analysis-loading").classList.remove("hidden");
+  $("analysis-result").classList.add("hidden");
+  $("loading-progress").textContent = "";
+  setAnalysisLoadingMeta("");
+  const label = document.querySelector("#analysis-loading .loading-label");
+  if (label) label.textContent = "Analysis failed";
+  const errBox = $("analysis-load-error");
+  if (errBox) {
+    errBox.textContent = message;
+    errBox.classList.remove("hidden");
+  }
+  $("btn-cancel-analysis")?.classList.add("hidden");
+  $("btn-analysis-error-back")?.classList.remove("hidden");
+}
+
+function cancelRunningAnalysis() {
+  analysisAbort.cancelled = true;
+  try {
+    // Best-effort stop if a shared worker is mid-search
+    if (window.__sfSharedWorker) window.__sfSharedWorker.postMessage("stop");
+  } catch (_) {}
 }
 
 function pollAnalysis(taskId) {
@@ -466,9 +605,19 @@ function renderAnalysis(result) {
 
   $("analysis-loading").classList.add("hidden");
   $("analysis-result").classList.remove("hidden");
+  $("analysis-load-error")?.classList.add("hidden");
+  $("btn-cancel-analysis")?.classList.add("hidden");
+  $("btn-analysis-error-back")?.classList.add("hidden");
+  document.getElementById("view-analysis")?.classList.add("is-reviewing");
+  const loadLabel = document.querySelector("#analysis-loading .loading-label");
+  if (loadLabel) loadLabel.textContent = "Analysing with Stockfish…";
+  const openingSidebar = $("meta-opening-sidebar");
+  if (openingSidebar) {
+    openingSidebar.textContent = result.opening || state.currentGame?.opening || $("meta-opening")?.textContent || "";
+  }
 
-  const g = state.currentGame;
-  const isWhite = g.player_color === "White";
+  const g = state.currentGame || {};
+  const isWhite = (g.player_color || "White") === "White";
 
   // Calculate move durations
   calculateMoveDurations(result.moves, g.time_control);
@@ -496,9 +645,15 @@ function renderAnalysis(result) {
   setupPlayerBar("top",    topColor, topName, topRating, topAcc);
   setupPlayerBar("bottom", isWhite ? "white" : "black", botName, botRating, botAcc);
 
-  // Default to moves tab
-  const movesTab = document.querySelector('.sidebar-tab[data-tab="moves"]');
-  if (movesTab) movesTab.click();
+  // Land on Review summary first; Moves tab is for replay
+  openSidebarTab("review");
+
+  // Cached-review banner in sidebar (dismissible — not sticky above the board)
+  const banner = $("cache-banner");
+  if (banner) {
+    const dismissed = sessionStorage.getItem("chessnow_cache_banner_dismissed") === "1";
+    banner.classList.toggle("hidden", !state.fromCache || dismissed);
+  }
 
   // ── Accuracy cards ────────────────────────────────────
   $("acc-white-big").textContent  = result.white_accuracy + "%";
@@ -558,6 +713,14 @@ function renderAnalysis(result) {
 
   // ── Set to start position ────────────────────────────
   goToMove(-1);
+
+  // Coach/player chrome affects height — refit board after paint so nothing clips.
+  requestAnimationFrame(() => {
+    resizeAnalysisBoard();
+    requestAnimationFrame(resizeAnalysisBoard);
+  });
+
+  persistActiveReview();
 }
 
 function setupPlayerBar(pos, color, name, rating, acc) {
@@ -588,17 +751,78 @@ function renderClsBreakdown(elId, counts) {
 // ── Board ──────────────────────────────────────────────
 
 // Returns optimal board pixel size based on available window width and height to fit screen
+function getBoardColChrome() {
+  const boardCol = document.querySelector(".board-col");
+  if (!boardCol) return 96;
+  let chrome = 0;
+  for (const child of boardCol.children) {
+    if (child.classList.contains("board-eval-wrap")) continue;
+    if (child.classList.contains("hidden")) continue;
+    if (child.classList.contains("coach-panel--mobile")) continue;
+    if (child.classList.contains("mobile-navigation-row")) continue;
+    if (child.classList.contains("mobile-bottom-bar")) continue;
+    if (child.classList.contains("mobile-review-card")) continue;
+    if (getComputedStyle(child).display === "none") continue;
+    chrome += child.getBoundingClientRect().height;
+  }
+  // Desktop board chrome is essentially the two player bars
+  return Math.max(chrome + 8, 88);
+}
+
 function getBoardSize() {
   const isMobile = window.innerWidth <= 900;
   if (isMobile) {
-    // Subtract safe margin padding (16px * 2) and eval bar width (22px + gap 8px)
-    const availableWidth = window.innerWidth - 32 - 30;
+    // Subtract safe margin padding (16px * 2) and eval bar width (42px + gap 10px)
+    const availableWidth = window.innerWidth - 32 - 52;
     return Math.max(260, Math.min(availableWidth, 480));
+  }
+
+  // Desktop: size board to the centered analysis workspace so board + sidebar sit together.
+  const workspaceMax = 1180;
+  const sidePad = 48;
+  const sidebar = Math.min(380, window.innerWidth * 0.34);
+  const gap = 28;
+  const evalBar = 52; // eval bar width + gap
+  const workspace = Math.min(workspaceMax, window.innerWidth - sidePad);
+  const availableWidth = workspace - sidebar - gap - evalBar;
+
+  // Fit board to the visible analysis viewport so content usually fits; page can still scroll if needed.
+  const view = document.getElementById("view-analysis");
+  let availableHeight;
+  if (view) {
+    const padTop = parseFloat(getComputedStyle(view).paddingTop) || 70;
+    availableHeight = view.clientHeight - padTop - getBoardColChrome() - 20;
   } else {
-    const availableWidth = window.innerWidth - 380 - 20 - 48 - 32;
-    // Subtract vertical spacing: header (56px), topbar/padding (~40px), player names and controls (~180px)
-    const availableHeight = window.innerHeight - 56 - 40 - 180;
-    return Math.max(300, Math.min(availableWidth, availableHeight, 660));
+    availableHeight = window.innerHeight - 70 - getBoardColChrome() - 20;
+  }
+  return Math.max(300, Math.min(availableWidth, availableHeight, 680));
+}
+
+function resizeAnalysisBoard() {
+  if (!state.board) return;
+  const boardEl = document.getElementById("board");
+  if (!boardEl) return;
+  const size = getBoardSize();
+  boardEl.style.width = size + "px";
+  state.board.resize();
+  const evalWrap = document.querySelector(".eval-bar-wrap");
+  if (evalWrap) evalWrap.style.height = size + "px";
+
+  // Lock sidebar to board-column height so only the moves subsection scrolls
+  const isMobile = window.innerWidth <= 900;
+  const rightCol = document.querySelector(".right-col");
+  const boardCol = document.querySelector(".board-col");
+  if (rightCol && boardCol) {
+    if (isMobile) {
+      rightCol.style.height = "";
+      rightCol.style.maxHeight = "";
+    } else {
+      const h = Math.round(boardCol.getBoundingClientRect().height);
+      if (h > 0) {
+        rightCol.style.height = h + "px";
+        rightCol.style.maxHeight = h + "px";
+      }
+    }
   }
 }
 
@@ -672,13 +896,7 @@ function enableMobilePieceDragging() {
 
 // Keep board size updated on window resize
 window.addEventListener("resize", () => {
-  if (state.board && state.result) {
-    const size = getBoardSize();
-    document.getElementById("board").style.width = size + "px";
-    state.board.resize();
-    const evalWrap = document.querySelector('.eval-bar-wrap');
-    if (evalWrap) evalWrap.style.height = size + 'px';
-  }
+  if (state.board && state.result) resizeAnalysisBoard();
 });
 
 // Only allow the side-to-move's pieces to be dragged
@@ -799,55 +1017,91 @@ function handleSnapEnd() {
 
 function scrollToActive() {
   const container = document.querySelector(".moves-list-wrap");
-  const active = document.querySelector(".move-cell.active");
-  if (container && active) {
-    container.scrollTo({
-      top: active.offsetTop - container.clientHeight / 2 + active.clientHeight / 2,
-      behavior: "smooth"
-    });
+  const active = document.querySelector("#moves-list .move-cell.active");
+  if (!container || !active) return;
+
+  // Use rects vs the scroll container — offsetTop is wrong under CSS grid / nested layout
+  const cRect = container.getBoundingClientRect();
+  const aRect = active.getBoundingClientRect();
+  const pad = 12;
+  const fullyVisible =
+    aRect.top >= cRect.top + pad && aRect.bottom <= cRect.bottom - pad;
+  if (fullyVisible) return;
+
+  const delta =
+    (aRect.top + aRect.bottom) / 2 - (cRect.top + cRect.bottom) / 2;
+  container.scrollTo({
+    top: Math.max(0, container.scrollTop + delta),
+    behavior: "smooth",
+  });
+}
+
+function setCoachContent({ hidden, badgeText, badgeBg, badgeColor, title, html, text }) {
+  const targets = [
+    {
+      panel: $("coach-panel"),
+      badge: $("coach-move-badge"),
+      title: $("coach-move-title"),
+      body: $("coach-text"),
+    },
+    {
+      panel: $("coach-panel-sidebar"),
+      badge: $("coach-move-badge-sidebar"),
+      title: $("coach-move-title-sidebar"),
+      body: $("coach-text-sidebar"),
+    },
+  ];
+
+  for (const t of targets) {
+    if (!t.panel) continue;
+    t.panel.classList.toggle("hidden", !!hidden);
+    if (hidden) continue;
+    if (t.badge) {
+      t.badge.className = "coach-badge";
+      t.badge.style.background = badgeBg || "var(--text-3)";
+      t.badge.style.color = badgeColor || "#110c07";
+      t.badge.textContent = badgeText || "·";
+    }
+    if (t.title) t.title.textContent = title || "Game Review";
+    if (t.body) {
+      if (html != null) t.body.innerHTML = html;
+      else t.body.textContent = text || "";
+    }
   }
 }
 
 function updateCoachBubble() {
-  const panel = $("coach-panel");
-  if (!panel) return;
-
   if (state.moveIndex === -1) {
-    panel.classList.remove("hidden");
-    $("coach-move-badge").className = "coach-badge";
-    $("coach-move-badge").style.background = "#fff";
-    $("coach-move-badge").style.color = "#110c07";
-    $("coach-move-badge").textContent = "🏁";
-    $("coach-move-title").textContent = "Starting Position";
-    $("coach-text").textContent = "Analyze this game. Swipe or tap Next to walk through key moments.";
+    setCoachContent({
+      hidden: false,
+      badgeText: "🏁",
+      badgeBg: "#fff",
+      badgeColor: "#110c07",
+      title: "Starting Position",
+      text: "Analyze this game. Use the controls to walk through key moments.",
+    });
     return;
   }
 
   const moves = getActiveMoves();
   const move = moves[state.moveIndex];
   if (!move) {
-    panel.classList.add("hidden");
+    setCoachContent({ hidden: true });
     return;
   }
 
-  panel.classList.remove("hidden");
-  
-  // Set classification details
   const clsInfo = CLS[move.cls];
-  const badge = $("coach-move-badge");
-  badge.className = `coach-badge`;
-  badge.style.background = clsInfo?.color || "var(--text-3)";
-  badge.style.color = "#110c07";
-  badge.textContent = clsInfo?.badge || "·";
-  
-  $("coach-move-title").textContent = `${clsInfo?.label || "Move"} · ${move.eval_str || "0.0"}`;
-  
-  // Generate dynamic coach comments
-  let comment = "";
   const sanText = `<b>${move.san}</b>`;
+  let comment = "";
   switch (move.cls) {
     case "book":
       comment = `${sanText} is standard book opening theory. You're following established lines.`;
+      break;
+    case "brilliant":
+      comment = `Brilliant! ${sanText} finds a striking idea — Stockfish loves it.`;
+      break;
+    case "great":
+      comment = `Great find! ${sanText} was essentially the only good move.`;
       break;
     case "best":
       comment = `Excellent play! ${sanText} was the best move in this position.`;
@@ -864,14 +1118,24 @@ function updateCoachBubble() {
     case "mistake":
       comment = `${sanText} is a mistake.` + (move.best_san ? ` The best move was <b>${move.best_san}</b>.` : "");
       break;
+    case "miss":
+      comment = `Missed chance. ${sanText} lets the opponent off the hook.` + (move.best_san ? ` Punish with <b>${move.best_san}</b>.` : "");
+      break;
     case "blunder":
       comment = `${sanText} is a blunder!` + (move.best_san ? ` The best move was <b>${move.best_san}</b>.` : "");
       break;
     default:
       comment = `You played ${sanText}. Stockfish evaluates this position at ${move.eval_str}.`;
   }
-  
-  $("coach-text").innerHTML = comment;
+
+  setCoachContent({
+    hidden: false,
+    badgeText: clsInfo?.badge || "·",
+    badgeBg: clsInfo?.color || "var(--text-3)",
+    badgeColor: "#110c07",
+    title: `${clsInfo?.label || "Move"} · ${move.eval_str || "0.0"}`,
+    html: comment,
+  });
 }
 
 function goToMove(idx) {
@@ -944,7 +1208,57 @@ function goToMove(idx) {
   applyEndGameKingHighlights();
 
   scrollToActive();
+
+  // Instantly show cached MultiPV from review (UI session can restyle; shape matches live eval)
+  if (state.moveIndex >= 0 && moves[state.moveIndex]?.engine_lines?.length) {
+    const cached = moves[state.moveIndex].engine_lines;
+    state.liveEvalLines = cached;
+    renderEngineLines(cached);
+  }
+
   triggerLiveEvaluation(fen);
+
+  // Keep refresh-restore position in sync (lightweight — only if a session already exists)
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_REVIEW_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      data.moveIndex = state.moveIndex;
+      sessionStorage.setItem(ACTIVE_REVIEW_KEY, JSON.stringify(data));
+    }
+  } catch (_) {}
+}
+
+/** Convert Stockfish MultiPV (STM scores) into renderEngineLines()-compatible rows. */
+function pvListToEngineLines(pvs, fen, whiteToMove) {
+  if (!pvs || !pvs.length || !fen) return [];
+  const lines = [];
+  for (let i = 0; i < pvs.length; i++) {
+    const pv = pvs[i];
+    if (!pv || !pv.uci) continue;
+    let san = pv.uci;
+    try {
+      const tmp = new Chess(fen);
+      const mv = tmp.move({
+        from: pv.uci.slice(0, 2),
+        to: pv.uci.slice(2, 4),
+        promotion: pv.uci[4] || undefined,
+      });
+      if (mv) san = mv.san;
+    } catch (_) {}
+    const stmCp = pv.score || 0;
+    const whiteCp = ReviewMath.stmCpToWhite(stmCp, whiteToMove);
+    const mateStm = pv.mate;
+    const mateWhite = mateStm == null ? null : (whiteToMove ? mateStm : -mateStm);
+    lines.push({
+      san,
+      uci: pv.uci,
+      cp: whiteCp,
+      score: formatScore(whiteCp, mateWhite),
+      rank: i + 1,
+    });
+  }
+  return lines;
 }
 
 function getKingSquares() {
@@ -1021,10 +1335,16 @@ function updateEvalBar(cpWhite, label) {
   const capped = Math.max(-600, Math.min(600, cpWhite));
   const pct = 50 + (capped / 600) * 45;   // 5%-95% range
   $("eval-bar-fill").style.height = `${pct}%`;
-  $("eval-bar-label").textContent = label || "0.0";
+  const el = $("eval-bar-label");
+  el.textContent = label || "0.0";
+  // Sit score in the larger color block so contrast stays readable
+  const whiteAhead = pct >= 50;
+  el.style.bottom = whiteAhead ? "10px" : "auto";
+  el.style.top = whiteAhead ? "auto" : "10px";
+  el.style.color = whiteAhead ? "#1a1208" : "#f0d9b5";
 }
 
-// ── Live Evaluation (Stockfish 18 MultiPV=3) ────────────────
+// ── Live Evaluation (Stockfish 19 MultiPV=3) ────────────────
 
 async function triggerLiveEvaluation(fen) {
   if (useLocalWasm) {
@@ -1138,14 +1458,17 @@ function drawEngineArrows(engineLines) {
 
   // Define Arrow arrowhead markers for all categories
   const arrowConfigs = [
-    { name: "blunder",    color: "rgba(239, 68, 68, 0.75)" },   // Red
-    { name: "mistake",    color: "rgba(249, 115, 22, 0.7)" },    // Orange
-    { name: "inaccuracy", color: "rgba(251, 191, 36, 0.7)" },    // Yellow
-    { name: "best",       color: "rgba(34, 197, 94, 0.7)" },     // Green
-    { name: "excellent",  color: "rgba(59, 130, 246, 0.7)" },    // Blue
-    { name: "book",       color: "rgba(163, 230, 53, 0.7)" },    // Lime
-    { name: "good",       color: "rgba(245, 158, 11, 0.55)" },   // Orange/Good
-    { name: "best_arrow", color: "rgba(34, 197, 94, 0.8)" }      // Green recommendation
+    { name: "blunder",    color: "rgba(239, 68, 68, 0.75)" },
+    { name: "miss",       color: "rgba(232, 121, 249, 0.75)" },
+    { name: "mistake",    color: "rgba(249, 115, 22, 0.7)" },
+    { name: "inaccuracy", color: "rgba(251, 191, 36, 0.7)" },
+    { name: "brilliant",  color: "rgba(34, 211, 238, 0.85)" },
+    { name: "great",      color: "rgba(56, 189, 248, 0.8)" },
+    { name: "best",       color: "rgba(34, 197, 94, 0.7)" },
+    { name: "excellent",  color: "rgba(59, 130, 246, 0.7)" },
+    { name: "book",       color: "rgba(163, 230, 53, 0.7)" },
+    { name: "good",       color: "rgba(245, 158, 11, 0.55)" },
+    { name: "best_arrow", color: "rgba(34, 197, 94, 0.8)" }
   ];
 
   arrowConfigs.forEach(cfg => {
@@ -1194,7 +1517,7 @@ function drawEngineArrows(engineLines) {
           isDashed: false
         });
       }
-      const isBadMove = ["inaccuracy", "mistake", "blunder"].includes(currentMove.cls);
+      const isBadMove = ["inaccuracy", "mistake", "miss", "blunder"].includes(currentMove.cls);
       if ((isBadMove || state.showBestArrow) && currentMove.best_uci && !currentMove.is_best && currentMove.uci !== currentMove.best_uci) {
         arrows.push({
           uci: currentMove.best_uci,
@@ -1246,14 +1569,17 @@ function drawEngineArrows(engineLines) {
 
 // ── Review Move Arrows (Chess.com Style) ───────────────
 const REVIEW_COLORS = {
-  blunder:    "rgba(239, 68, 68, 0.75)",  // Red
-  mistake:    "rgba(249, 115, 22, 0.7)",   // Orange
-  inaccuracy: "rgba(251, 191, 36, 0.7)",   // Yellow
-  best:       "rgba(34, 197, 94, 0.7)",    // Green
-  excellent:  "rgba(59, 130, 246, 0.7)",   // Blue
-  book:       "rgba(163, 230, 53, 0.7)",   // Light Green/Lime
-  good:       "rgba(163, 230, 53, 0.55)",  // Good
-  best_arrow: "rgba(34, 197, 94, 0.8)"     // Solid Green for recommended best
+  blunder:    "rgba(239, 68, 68, 0.75)",
+  miss:       "rgba(232, 121, 249, 0.75)",
+  mistake:    "rgba(249, 115, 22, 0.7)",
+  inaccuracy: "rgba(251, 191, 36, 0.7)",
+  brilliant:  "rgba(34, 211, 238, 0.85)",
+  great:      "rgba(56, 189, 248, 0.8)",
+  best:       "rgba(34, 197, 94, 0.7)",
+  excellent:  "rgba(59, 130, 246, 0.7)",
+  book:       "rgba(163, 230, 53, 0.7)",
+  good:       "rgba(163, 230, 53, 0.55)",
+  best_arrow: "rgba(34, 197, 94, 0.8)"
 };
 
 function drawReviewArrows() {
@@ -1276,7 +1602,7 @@ function drawReviewArrows() {
   }
 
   // 2. Draw best move dashed arrow automatically for inaccuracies/mistakes/blunders, or if showBestArrow toggle is active
-  const isBadMove = ["inaccuracy", "mistake", "blunder"].includes(move.cls);
+  const isBadMove = ["inaccuracy", "mistake", "miss", "blunder"].includes(move.cls);
   if ((isBadMove || state.showBestArrow) && move.best_uci && !move.is_best && move.uci !== move.best_uci) {
     arrows.push({
       uci: move.best_uci,
@@ -1307,8 +1633,11 @@ function drawVisualReviewArrows(arrows) {
   // Define arrowhead markers for review classifications
   const configs = [
     { name: "blunder",    color: REVIEW_COLORS.blunder },
+    { name: "miss",       color: REVIEW_COLORS.miss },
     { name: "mistake",    color: REVIEW_COLORS.mistake },
     { name: "inaccuracy", color: REVIEW_COLORS.inaccuracy },
+    { name: "brilliant",  color: REVIEW_COLORS.brilliant },
+    { name: "great",      color: REVIEW_COLORS.great },
     { name: "best",       color: REVIEW_COLORS.best },
     { name: "excellent",  color: REVIEW_COLORS.excellent },
     { name: "book",       color: REVIEW_COLORS.book },
@@ -1376,16 +1705,14 @@ function renderMovesRange(moves, container, path) {
     const white = moves[i];
     const black = moves[i + 1];
 
-    // 1. White move (Column 1)
-    container.appendChild(makeMoveCell(white, i, path));
-
-    // 2. Move number (Column 2)
+    // Chess.com order: move number | white | black
     const numCell = document.createElement("div");
     numCell.className = "move-num";
     numCell.textContent = white.move_num + ".";
     container.appendChild(numCell);
 
-    // 3. Black move or empty placeholder (Column 3)
+    container.appendChild(makeMoveCell(white, i, path));
+
     if (black) {
       container.appendChild(makeMoveCell(black, i + 1, path));
     } else {
@@ -1594,8 +1921,9 @@ function showTooltip(e, move) {
     : `Centipawn loss: ${move.cpl}`;
 
   const bestEl = $("tooltip-best");
-  if (move.best_uci && !move.is_best) {
-    bestEl.textContent = `Best: ${move.best_uci}`;
+  const bestLabel = move.best_san || move.best_uci;
+  if (bestLabel && !move.is_best) {
+    bestEl.textContent = `Best: ${bestLabel}`;
     bestEl.classList.remove("hidden");
   } else {
     bestEl.classList.add("hidden");
@@ -1691,6 +2019,10 @@ function renderChart(moves) {
           goToMove(elements[0].index);
         }
       },
+      onHover: (e, elements) => {
+        const canvas = e.native?.target;
+        if (canvas) canvas.style.cursor = elements.length ? "pointer" : "default";
+      },
     }
   });
 
@@ -1775,7 +2107,9 @@ $("logo-btn").addEventListener("click", () => {
 });
 
 // Games
-$("games-back").addEventListener("click", () => showView("view-home"));
+$("games-back").addEventListener("click", () => {
+  window.location.hash = "analysis";
+});
 $("games-refresh").addEventListener("click", loadGames);
 $("games-profile-tag").addEventListener("click", () => {
   if (state.username) {
@@ -1791,7 +2125,13 @@ document.querySelectorAll(".mode-btn").forEach(btn => {
 });
 
 // Analysis
-$("analysis-back").addEventListener("click", () => showView("view-games"));
+function leaveAnalysisToGames() {
+  document.getElementById("view-analysis")?.classList.remove("is-reviewing");
+  // Prefer games list; fall back to Local Game Analyzer entry
+  window.location.hash = state.games?.length ? "games" : "analysis";
+}
+$("analysis-back").addEventListener("click", leaveAnalysisToGames);
+$("analysis-back-sidebar")?.addEventListener("click", leaveAnalysisToGames);
 $("btn-main-line").addEventListener("click", () => {
   if (!state.currentVariationPath || !state.currentVariationPath.length) return;
   const firstBranch = state.currentVariationPath[0];
@@ -1835,7 +2175,7 @@ $("btn-mobile-next-key").addEventListener("click", () => {
   // Scan forward for next blunder, mistake, or inaccuracy (key moment of interest)
   let nextKeyIdx = -1;
   for (let i = state.moveIndex + 1; i < moves.length; i++) {
-    if (["blunder", "mistake", "inaccuracy"].includes(moves[i].cls)) {
+    if (["blunder", "mistake", "miss", "inaccuracy"].includes(moves[i].cls)) {
       nextKeyIdx = i;
       break;
     }
@@ -1871,12 +2211,6 @@ document.querySelectorAll(".sidebar-tab").forEach(tab => {
       }, 50);
     }
   });
-});
-
-// "Game Review" button trigger
-$("btn-trigger-review").addEventListener("click", () => {
-  const reviewTab = document.querySelector('.sidebar-tab[data-tab="review"]');
-  if (reviewTab) reviewTab.click();
 });
 
 // "Show Arrows" toggle change handler
@@ -2156,12 +2490,152 @@ function initLandingPageListeners() {
   });
 }
 
+// ── Analyzer extras: PGN import, cancel, jump filters, cache re-run ──
+function showPgnError(msg) {
+  const el = $("pgn-error");
+  if (!el) return;
+  if (!msg) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function gameFromPgn(pgnText) {
+  const chess = new Chess();
+  if (!chess.load_pgn(pgnText)) {
+    throw new Error("Could not parse that PGN. Check the text and try again.");
+  }
+  const headers = chess.header();
+  const white = headers.White || "White";
+  const black = headers.Black || "Black";
+  const result = headers.Result || "*";
+  let opening = headers.Opening || headers.ECO || "Custom PGN";
+  if (headers.ECOUrl) {
+    try {
+      opening = headers.ECOUrl.split("/").pop().replace(/-/g, " ");
+    } catch (_) {}
+  }
+  const history = chess.history({ verbose: true });
+  if (!history.length) throw new Error("PGN has no moves to analyse.");
+
+  // Prefer White as the "player" unless a known username matches Black
+  const uname = (state.username || "").toLowerCase();
+  const playerColor =
+    uname && black.toLowerCase() === uname ? "Black" :
+    uname && white.toLowerCase() === uname ? "White" : "White";
+
+  const id = `pgn_${Date.now()}`;
+  return {
+    id,
+    url: id,
+    white,
+    black,
+    white_rating: headers.WhiteElo || "?",
+    black_rating: headers.BlackElo || "?",
+    opponent: playerColor === "White" ? black : white,
+    opponent_rating: "?",
+    player_color: playerColor,
+    result: result === "1-0" ? (playerColor === "White" ? "Win" : "Loss")
+          : result === "0-1" ? (playerColor === "Black" ? "Win" : "Loss")
+          : result === "1/2-1/2" ? "Draw" : result,
+    date: headers.Date || "",
+    opening,
+    time_class: "custom",
+    time_control: headers.TimeControl || "",
+    pgn: pgnText,
+  };
+}
+
+function jumpToNextClass(cls) {
+  if (!state.result?.moves?.length) return;
+  const moves = state.result.moves;
+  const start = state.moveIndex + 1;
+  for (let i = 0; i < moves.length; i++) {
+    const idx = (start + i) % moves.length;
+    if (moves[idx].cls === cls) {
+      goToMove(idx);
+      openSidebarTab("moves");
+      return;
+    }
+  }
+}
+
+function initAnalyzerExtras() {
+  $("btn-cancel-analysis")?.addEventListener("click", () => {
+    cancelRunningAnalysis();
+    const label = document.querySelector("#analysis-loading .loading-label");
+    if (label) label.textContent = "Cancelling…";
+  });
+
+  $("btn-analysis-error-back")?.addEventListener("click", () => {
+    window.location.hash = state.games?.length ? "games" : "analysis";
+  });
+
+  $("btn-reanalyze")?.addEventListener("click", () => {
+    if (!state.currentGame) return;
+    sessionStorage.removeItem("chessnow_cache_banner_dismissed");
+    startAnalysis(state.currentGame, { forceReanalyze: true });
+  });
+
+  $("btn-dismiss-cache")?.addEventListener("click", () => {
+    sessionStorage.setItem("chessnow_cache_banner_dismissed", "1");
+    $("cache-banner")?.classList.add("hidden");
+  });
+
+  document.querySelectorAll(".jump-chip").forEach(chip => {
+    chip.addEventListener("click", () => jumpToNextClass(chip.dataset.jump));
+  });
+
+  $("pgn-analyze-btn")?.addEventListener("click", () => {
+    showPgnError("");
+    const text = ($("pgn-input")?.value || "").trim();
+    if (!text) {
+      showPgnError("Paste a PGN first.");
+      return;
+    }
+    try {
+      const game = gameFromPgn(text);
+      state.games = state.games || [];
+      startAnalysis(game);
+    } catch (err) {
+      showPgnError(err.message || "Invalid PGN");
+    }
+  });
+
+  $("pgn-file")?.addEventListener("change", async (e) => {
+    showPgnError("");
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      if ($("pgn-input")) $("pgn-input").value = text;
+      const game = gameFromPgn(text);
+      startAnalysis(game);
+    } catch (err) {
+      showPgnError(err.message || "Could not read that file.");
+    } finally {
+      e.target.value = "";
+    }
+  });
+}
+
 // ── Init ───────────────────────────────────────────────
-const DEFAULT_USERNAME = "twelfth_doctor";
-$("username-input").value = DEFAULT_USERNAME;
+// Prefill username from the last successful Chess.com lookup in this browser
+try {
+  const savedUser = localStorage.getItem(LAST_USERNAME_KEY);
+  if (savedUser && $("username-input")) {
+    $("username-input").value = savedUser;
+  }
+} catch (_) {}
 initPhoneAuth();
 initVoiceCall();
 initLandingPageListeners();
+initAnalyzerExtras();
+$("btn-mobile-show-best")?.classList.toggle("active", !!state.showBestArrow);
+$("chk-show-arrows") && ($("chk-show-arrows").checked = true);
 
 // Initialize dynamic SPA hash routing
 window.addEventListener("hashchange", handleHashRouting);
@@ -2192,54 +2666,116 @@ handleHashRouting();
 // STANDALONE OFFLINE / MOBILE FALLBACK ENGINE HELPERS
 // ══════════════════════════════════════════════════════
 
-async function getStockfishWorker() {
-  // Static worker file — stockfish.js auto-locates stockfish.wasm from the same directory.
-  // Blob URL workers are unreliable in iOS WKWebView so we avoid them entirely.
-  // Use stockfish.js directly as the worker — it has built-in worker detection
-  // and derives the WASM path from its own URL (/js/stockfish.wasm). Using a
-  // wrapper file breaks this because self.location would point to the wrapper.
-  const worker = new Worker("/js/stockfish.js");
+/** Warm Stockfish worker reused across review + live eval (Hash stays hot). */
+let sharedSfWorker = null;
+let sharedSfReady = null;
+let analysisInProgress = false;
 
-  // Stockfish posts a banner message when its WASM finishes loading.
-  // Only after that banner arrives is it safe to send "uci" and wait for "uciok".
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Stockfish init timeout")), 20000);
-    let uciSent = false;
+function analysisLimitsForMode(mode) {
+  // Depth is the quality target; movetime is a safety cap so mobile doesn't hang.
+  if (mode === "quick") return { depth: 12, movetime: 250 };
+  if (mode === "deep")  return { depth: 18, movetime: 1200 };
+  return { depth: 15, movetime: 500 };
+}
+
+async function getStockfishWorker() {
+  // Stockfish 19 lite-single: Worker entry is /js/stockfish.js; it resolves
+  // sibling /js/stockfish.wasm from its own URL. Blob URL workers break iOS WKWebView.
+  if (sharedSfWorker && sharedSfReady) {
+    try {
+      return await sharedSfReady;
+    } catch (_) {
+      sharedSfWorker = null;
+      sharedSfReady = null;
+    }
+  }
+
+  const worker = new Worker("/js/stockfish.js");
+  sharedSfWorker = worker;
+
+  // SF19 does not always emit a boot banner — send uci once the worker is alive
+  // and wait for uciok. Retry once in case the first command arrived pre-ready.
+  sharedSfReady = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Stockfish init timeout")), 30000);
+    let resolved = false;
     const h = e => {
       if (typeof e.data !== "string") return;
-      if (!uciSent) {
-        uciSent = true;
-        worker.postMessage("uci");
-      } else if (e.data.includes("uciok")) {
+      if (e.data.includes("uciok")) {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         worker.removeEventListener("message", h);
-        resolve();
+        // Persist TT across positions in a game; lite-single is 1 thread.
+        worker.postMessage("setoption name Hash value 128");
+        worker.postMessage("setoption name Threads value 1");
+        worker.postMessage("isready");
+        resolve(worker);
       }
     };
     worker.addEventListener("message", h);
-    worker.onerror = e => { clearTimeout(timeout); reject(e); };
+    worker.onerror = e => {
+      clearTimeout(timeout);
+      sharedSfWorker = null;
+      sharedSfReady = null;
+      reject(e);
+    };
+    worker.postMessage("uci");
+    setTimeout(() => { if (!resolved) worker.postMessage("uci"); }, 250);
   });
 
-  return worker;
+  return sharedSfReady;
+}
+
+function resetSharedStockfishWorker() {
+  if (sharedSfWorker) {
+    try { sharedSfWorker.terminate(); } catch (_) {}
+  }
+  sharedSfWorker = null;
+  sharedSfReady = null;
+}
+
+async function chessComFetchWithRetry(url, attempts = 3) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await customFetch(url);
+      if (res.status === 429 || res.status === 503) {
+        await new Promise(r => setTimeout(r, 400 * Math.pow(2, i)));
+        lastErr = new Error(`Chess.com rate limited (${res.status})`);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      await new Promise(r => setTimeout(r, 300 * Math.pow(2, i)));
+    }
+  }
+  throw lastErr || new Error("Chess.com request failed");
 }
 
 async function fetchGamesDirect(username, count = 20) {
-  const archivesRes = await customFetch(`https://api.chess.com/pub/player/${username.toLowerCase()}/games/archives`);
-  if (!archivesRes.ok) throw new Error("User not found on Chess.com");
+  const uname = username.toLowerCase().trim();
+  const archivesRes = await chessComFetchWithRetry(`https://api.chess.com/pub/player/${encodeURIComponent(uname)}/games/archives`);
+  if (archivesRes.status === 404) throw new Error("User not found on Chess.com");
+  if (!archivesRes.ok) throw new Error(`Chess.com archives error (${archivesRes.status})`);
   const archivesData = await archivesRes.json();
   const archives = archivesData.archives || [];
   if (!archives.length) throw new Error("No games found for this user");
 
-  // Fetch last 2 archives
+  // Walk newest → oldest archives until we have `count` games (serial + light pacing).
   const allGames = [];
-  const monthsToFetch = Math.min(2, archives.length);
-  for (let i = archives.length - monthsToFetch; i < archives.length; i++) {
-    const r = await customFetch(archives[i]);
-    if (r.ok) {
-      const d = await r.json();
-      allGames.push(...(d.games || []));
+  for (let i = archives.length - 1; i >= 0 && allGames.length < count; i--) {
+    const r = await chessComFetchWithRetry(archives[i]);
+    if (!r.ok) continue;
+    const d = await r.json();
+    const monthGames = d.games || [];
+    allGames.push(...monthGames);
+    if (i > 0 && allGames.length < count) {
+      await new Promise(res => setTimeout(res, 120));
     }
   }
+
+  if (!allGames.length) throw new Error("No games found for this user");
 
   const result_map = {
     "win": "Win", "checkmated": "Loss", "resigned": "Loss",
@@ -2250,11 +2786,11 @@ async function fetchGamesDirect(username, count = 20) {
 
   const formatted = [];
   const gamesToFormat = allGames.slice(-count).reverse();
-  
+
   for (const g of gamesToFormat) {
     const white = g.white || {};
     const black = g.black || {};
-    const isWhite = white.username?.toLowerCase() === username.toLowerCase();
+    const isWhite = white.username?.toLowerCase() === uname;
     const player = isWhite ? white : black;
     const opponent = isWhite ? black : white;
     const result = result_map[player.result] || "?";
@@ -2298,17 +2834,44 @@ async function fetchGamesDirect(username, count = 20) {
     });
   }
 
+  try {
+    localStorage.setItem("chesscom_last_user", uname);
+  } catch (_) {}
+
   return formatted;
 }
 
 async function runLocalWasmAnalysis(game) {
-  const cacheKey = `review_${game.url}_${state.analysisMode}`;
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    state.result = JSON.parse(cached);
-    renderAnalysis(state.result);
-    return;
+  if (!window.ReviewMath) throw new Error("ReviewMath failed to load.");
+  ReviewMath.purgeStaleReviewCaches(localStorage);
+
+  const cachePrefix = ReviewMath.REVIEW_CACHE_PREFIX;
+  const cacheKey = `${cachePrefix}${game.url || game.id || "pgn"}_${state.analysisMode}`;
+  if (!state.forceReanalyze) {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        state.result = JSON.parse(cached);
+        state.fromCache = true;
+        renderAnalysis(state.result);
+        return;
+      } catch (_) {
+        localStorage.removeItem(cacheKey);
+      }
+    }
   }
+  state.fromCache = false;
+  state.forceReanalyze = false;
+
+  analysisInProgress = true;
+  try {
+    await runLocalWasmAnalysisUncached(game, cacheKey);
+  } finally {
+    analysisInProgress = false;
+  }
+}
+
+async function runLocalWasmAnalysisUncached(game, cacheKey) {
 
   // Parse clock comments from PGN (e.g. [%clk 0:02:59])
   const clkMatches = [];
@@ -2327,29 +2890,34 @@ async function runLocalWasmAnalysis(game) {
   $("progress-bar").style.width = "0%";
   $("loading-progress").textContent = `0 / ${totalMoves} moves`;
 
-  // Start Stockfish Web Worker via same-origin Blob URL
   const worker = await getStockfishWorker();
-  
-  const depthLimit = state.analysisMode === "quick" ? 8 : state.analysisMode === "deep" ? 14 : 11;
-  const timeLimit = state.analysisMode === "quick" ? 50 : state.analysisMode === "deep" ? 300 : 120;
+  // Fresh TT for a new game; keep the same worker so Hash warms across plies.
+  worker.postMessage("ucinewgame");
+  worker.postMessage("setoption name MultiPV value 3");
+
+  const { depth: depthLimit, movetime: timeLimit } = analysisLimitsForMode(state.analysisMode);
+  $("loading-progress").textContent = `0 / ${totalMoves} moves · depth ${depthLimit}`;
 
   const movesData = [];
-  const whiteCpls = [];
-  const blackCpls = [];
-  
+  const whiteAccEntries = [];
+  const blackAccEntries = [];
+
   const board = new Chess();
-  
-  let lastEval = await evaluateFen(worker, board.fen(), timeLimit);
-  
+
+  let lastEval = await evaluateFen(worker, board.fen(), timeLimit, 3, depthLimit);
+  let prevCls = null;
+
   for (let i = 0; i < totalMoves; i++) {
+    if (analysisAbort.cancelled) {
+      throw new Error("cancelled");
+    }
     const m = moves[i];
-    const isWhite = m.color === 'w';
+    const isWhite = m.color === "w";
     const san = m.san;
     const uci = m.from + m.to + (m.promotion || "");
-    
-    // Calculate best move SAN before changing the main board state
+
     let bestSan = null;
-    if (lastEval && lastEval.bestMove) {
+    if (lastEval && lastEval.hasPv && lastEval.bestMove) {
       const from = lastEval.bestMove.slice(0, 2);
       const to = lastEval.bestMove.slice(2, 4);
       const promo = lastEval.bestMove[4] || undefined;
@@ -2357,59 +2925,110 @@ async function runLocalWasmAnalysis(game) {
       const tempMove = tempChess.move({ from, to, promotion: promo });
       if (tempMove) bestSan = tempMove.san;
     }
-    
+
+    const fenBefore = board.fen();
+    const beforeBoard = new Chess(fenBefore);
     board.move(m);
     const postFen = board.fen();
-    
-    const evalData = await evaluateFen(worker, postFen, timeLimit);
-    
-    const moverColor = isWhite ? 1 : -1;
-    const scoreBeforeRel = lastEval.score * moverColor;
-    const scoreAfterRel = evalData.score * moverColor;
-    
-    let cpl = scoreBeforeRel - scoreAfterRel;
-    if (lastEval.mate !== null || evalData.mate !== null) {
-      cpl = (lastEval.mate !== null && evalData.mate === null) ? 200 : 0;
+    const afterBoard = new Chess(postFen);
+
+    const evalData = await evaluateFen(worker, postFen, timeLimit, 3, depthLimit);
+
+    // score fields are STM-relative CP (mates already synthesized in evaluateFen).
+    // Before move: STM = mover. After move: STM = opponent → negate for mover / White POV.
+    const scoreBeforeWhite = ReviewMath.stmCpToWhite(lastEval.score, isWhite);
+    const scoreAfterWhite = ReviewMath.stmCpToWhite(evalData.score, !isWhite);
+    const cpl = Math.round(ReviewMath.cplFromStm(lastEval.score, evalData.score));
+
+    const beforeWP = ReviewMath.winPercentForSide(scoreBeforeWhite, isWhite);
+    const afterWP = ReviewMath.winPercentForSide(scoreAfterWhite, isWhite);
+    const moveAcc = ReviewMath.moveAccuracyFromWinPercents(beforeWP, afterWP);
+
+    // Only trust "Best" when we actually saw a PV (mirrors server has_pv guard).
+    const isBest = !!(lastEval.hasPv && lastEval.bestMove && uci === lastEval.bestMove);
+
+    // MultiPV gap at the pre-move position (both scores STM = mover)
+    let onlyMoveGap = 0;
+    if (lastEval.pvs && lastEval.pvs[1]) {
+      const pv1WP = ReviewMath.cpToWinPercent(lastEval.pvs[0] ? lastEval.pvs[0].score : lastEval.score);
+      const pv2WP = ReviewMath.cpToWinPercent(lastEval.pvs[1].score);
+      onlyMoveGap = pv1WP - pv2WP;
     }
-    cpl = Math.max(0, Math.min(cpl, 1000));
-    
-    if (isWhite) whiteCpls.push(Math.min(cpl, 300));
-    else blackCpls.push(Math.min(cpl, 300));
-    
-    const isBest = uci.slice(0, 4) === lastEval.bestMove.slice(0, 4);
-    const cls = classifyCpl(cpl, isBest);
-    const wp = winProb(evalData.score);
-    
-    movesData.push({
-      idx:         i + 1,
-      move_num:    Math.floor(i / 2) + 1,
-      san:         san,
-      uci:         uci,
-      color:       isWhite ? "white" : "black",
-      fen:         postFen,
-      eval_cp:     evalData.score,
-      eval_str:    formatScore(evalData.score, evalData.mate),
-      cpl:         Math.round(cpl),
-      cls:         cls,
-      win_prob:    wp,
-      is_best:     isBest,
-      best_uci:    !isBest ? lastEval.bestMove : null,
-      best_san:    !isBest ? bestSan : null,
-      clk:         clkMatches[i] || null,
-      variations:  [],
+
+    const sacrificed = ReviewMath.isMaterialSacrifice(beforeBoard, afterBoard, isWhite);
+    const opponentJustBlundered = prevCls === "blunder";
+    // before: STM = mover → mate > 0 means we could force mate
+    const missedMate = lastEval.mate != null && lastEval.mate > 0 && !isBest;
+    // after: STM = opponent → mate > 0 means they can force mate now
+    const allowedMate = evalData.mate != null && evalData.mate > 0 &&
+      !(lastEval.mate != null && lastEval.mate < 0);
+
+    const cls = ReviewMath.classifyMove({
+      beforeWP,
+      afterWP,
+      isBest,
+      onlyMoveGap,
+      sacrificed,
+      opponentJustBlundered,
+      plyIndex: i,
+      missedMate,
+      allowedMate,
     });
 
+    if (cls !== "book") {
+    const accEntry = { acc: moveAcc, beforeWP, plyIndex: i };
+    if (isWhite) whiteAccEntries.push(accEntry);
+    else blackAccEntries.push(accEntry);
+    }
+
+    const wp = ReviewMath.cpToWinPercent(scoreAfterWhite);
+    // Mate sign from White's seat: after White moves, STM mate is Black's → flip.
+    const mateWhite = evalData.mate == null
+      ? null
+      : (isWhite ? -evalData.mate : evalData.mate);
+
+    movesData.push({
+      idx:           i + 1,
+      move_num:      Math.floor(i / 2) + 1,
+      san:           san,
+      uci:           uci,
+      color:         isWhite ? "white" : "black",
+      fen:           postFen,
+      eval_cp:       scoreAfterWhite,
+      eval_str:      formatScore(scoreAfterWhite, mateWhite),
+      cpl:           cpl,
+      cls:           cls,
+      win_prob:      Math.round(wp * 10) / 10,
+      move_accuracy: Math.round(moveAcc * 10) / 10,
+      is_best:       isBest,
+      best_uci:      !isBest && lastEval.hasPv ? lastEval.bestMove : null,
+      best_san:      !isBest ? bestSan : null,
+      clk:           clkMatches[i] || null,
+      depth:         evalData.depth || null,
+      // Pre-move alternatives (what could have been played) — for coach / UI session
+      candidates:    pvListToEngineLines(lastEval.pvs, fenBefore, isWhite),
+      // Post-move MultiPV at the position the user lands on when scrubbing the move list
+      engine_lines:  pvListToEngineLines(evalData.pvs, postFen, !isWhite),
+      variations:    [],
+    });
+
+    prevCls = cls;
     lastEval = evalData;
-    
+
     const pct = Math.round(((i + 1) / totalMoves) * 100);
     $("progress-bar").style.width = `${pct}%`;
-    $("loading-progress").textContent = `${i + 1} / ${totalMoves} moves`;
+    const reached = evalData.depth != null ? ` · d${evalData.depth}` : "";
+    $("loading-progress").textContent = `${i + 1} / ${totalMoves} moves${reached}`;
   }
-  
-  worker.terminate();
 
+  // Keep shared worker warm for the next review / live eval (do not terminate).
+
+  const emptyCounts = () => ({
+    brilliant: 0, great: 0, best: 0, excellent: 0, good: 0, book: 0,
+    inaccuracy: 0, mistake: 0, miss: 0, blunder: 0,
+  });
   const getCounts = (color) => {
-    const c = { best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 };
+    const c = emptyCounts();
     movesData.forEach(m => {
       if (m.color === color && m.cls in c) c[m.cls]++;
     });
@@ -2420,86 +3039,141 @@ async function runLocalWasmAnalysis(game) {
     white_player:   game.white,
     black_player:   game.black,
     opening:        game.opening,
-    white_accuracy: calculateAccuracy(whiteCpls),
-    black_accuracy: calculateAccuracy(blackCpls),
+    white_accuracy: ReviewMath.gameAccuracyWeighted(whiteAccEntries),
+    black_accuracy: ReviewMath.gameAccuracyWeighted(blackAccEntries),
     white_counts:   getCounts("white"),
     black_counts:   getCounts("black"),
     moves:          movesData,
     start_fen:      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     result:         game.result || "*",
+    analysis_meta:  { depth: depthLimit, movetime: timeLimit, engine: "local-stockfish" },
   };
 
-  localStorage.setItem(cacheKey, JSON.stringify(reviewResult));
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(reviewResult));
+  } catch (_) { /* quota */ }
 
   state.result = reviewResult;
   renderAnalysis(reviewResult);
 }
 
-function evaluateFen(worker, fen, timeLimit) {
-  return new Promise(resolve => {
+/**
+ * Evaluate a FEN. Returns side-to-move relative score (mates → synthetic CP),
+ * mate ply if any, best move, hasPv flag, and optional MultiPV lines.
+ */
+function evaluateFen(worker, fen, timeLimit, multipv = 1, depth = 15) {
+  return new Promise((resolve, reject) => {
+    const pvs = [];
     let bestMove = "";
+    let hasPv = false;
     let score = 0;
     let mate = null;
-    
+    let reachedDepth = 0;
+    const hardTimeout = setTimeout(() => {
+      try { worker.postMessage("stop"); } catch (_) {}
+    }, Math.max(timeLimit * 3, 5000));
+
     const onMsg = (e) => {
       const line = e.data;
+      if (typeof line !== "string") return;
       if (line.startsWith("info depth")) {
-        const cpMatch = line.match(/score cp (-?\d+)/);
-        if (cpMatch) score = parseInt(cpMatch[1]);
-        
+        const depthMatch = line.match(/\bdepth (\d+)/);
+        if (depthMatch) reachedDepth = Math.max(reachedDepth, parseInt(depthMatch[1], 10));
+
+        const multipvMatch = line.match(/multipv (\d+)/);
+        const rank = multipvMatch ? parseInt(multipvMatch[1], 10) - 1 : 0;
+
+        let lineScore = null;
+        let lineMate = null;
         const mateMatch = line.match(/score mate (-?\d+)/);
-        if (mateMatch) mate = parseInt(mateMatch[1]);
-        
+        const cpMatch = line.match(/score cp (-?\d+)/);
+        if (mateMatch) {
+          lineMate = parseInt(mateMatch[1], 10);
+          lineScore = ReviewMath.stmToCp(0, lineMate);
+        } else if (cpMatch) {
+          lineMate = null;
+          lineScore = ReviewMath.stmToCp(parseInt(cpMatch[1], 10), null);
+        }
+
         const pvMatch = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
-        if (pvMatch) bestMove = pvMatch[1];
+        const pvUci = pvMatch ? pvMatch[1] : "";
+
+        if (lineScore != null && (pvUci || multipvMatch)) {
+          pvs[rank] = { uci: pvUci, score: lineScore, mate: lineMate, depth: reachedDepth };
+        }
+
+        if (rank === 0 && lineScore != null) {
+          score = lineScore;
+          mate = lineMate;
+          if (pvUci) {
+            bestMove = pvUci;
+            hasPv = true;
+          }
+        }
       } else if (line.startsWith("bestmove")) {
+        clearTimeout(hardTimeout);
         worker.removeEventListener("message", onMsg);
-        resolve({ score, mate, bestMove: bestMove || line.split(" ")[1] });
+        const bm = line.split(" ")[1];
+        const finalBest = bestMove || (bm && bm !== "(none)" ? bm : "");
+        resolve({
+          score,
+          mate,
+          bestMove: finalBest,
+          hasPv,
+          depth: reachedDepth,
+          pvs: pvs.filter(Boolean),
+        });
       }
     };
-    
+
     worker.addEventListener("message", onMsg);
-    worker.postMessage("position fen " + fen);
-    worker.postMessage("go movetime " + timeLimit);
+    try {
+      if (multipv > 1) worker.postMessage("setoption name MultiPV value " + multipv);
+      worker.postMessage("position fen " + fen);
+      // Prefer reaching depth; movetime is only a cap.
+      worker.postMessage("go depth " + depth + " movetime " + timeLimit);
+    } catch (err) {
+      clearTimeout(hardTimeout);
+      worker.removeEventListener("message", onMsg);
+      resetSharedStockfishWorker();
+      reject(err);
+    }
   });
 }
 
 function classifyCpl(cpl, isBest) {
-  if (isBest) return "best";
-  if (cpl <= 15) return "excellent";
-  if (cpl <= 35) return "good";
-  if (cpl <= 60) return "inaccuracy";
-  if (cpl <= 120) return "mistake";
-  return "blunder";
+  return ReviewMath.classifyCpl(cpl, isBest);
 }
 
 function winProb(cp) {
-  return 50 + 50 * (2 / (1 + Math.exp(-0.00368 * cp)) - 1);
+  return ReviewMath.cpToWinPercent(cp);
 }
 
 function calculateAccuracy(cpls) {
-  if (!cpls.length) return 100;
-  const avg = cpls.reduce((a, b) => a + b, 0) / cpls.length;
-  const acc = 100 * Math.exp(-avg / 400);
-  return Math.round(Math.max(0, Math.min(100, acc)) * 10) / 10;
+  return ReviewMath.calculateAccuracyFromCpls(cpls);
 }
 
 function formatScore(cp, mate) {
-  if (mate !== null) return `M${mate}`;
+  if (mate != null) return mate > 0 ? `M${mate}` : `-M${Math.abs(mate)}`;
   return (cp / 100 >= 0 ? "+" : "") + (cp / 100).toFixed(1);
 }
 
-let liveWasmWorker = null;
+let liveEvalSeq = 0;
 async function runLocalWasmLiveEval(fen) {
+  // Shared worker is owned by full-game review while analysisInProgress.
+  if (analysisInProgress) return;
+
   const linesList = $("engine-lines-list");
   linesList.innerHTML = `<div class="engine-line-item empty">Engine thinking…</div>`;
 
-  if (liveWasmWorker) liveWasmWorker.terminate();
-  liveWasmWorker = await getStockfishWorker();
+  const seq = ++liveEvalSeq;
+  const worker = await getStockfishWorker();
+  // Stop any in-flight search before starting live MultiPV.
+  try { worker.postMessage("stop"); } catch (_) {}
 
-  const lines = await evaluateMultiPV(liveWasmWorker, fen, 11, 120);
-  liveWasmWorker.terminate();
-  liveWasmWorker = null;
+  const { depth, movetime } = analysisLimitsForMode(state.analysisMode || "normal");
+  const lines = await evaluateMultiPV(worker, fen, Math.min(depth, 14), Math.min(movetime, 400));
+  if (seq !== liveEvalSeq) return; // superseded by a newer live eval
 
   state.liveEvalLines = lines;
   renderEngineLines(lines);
@@ -2788,11 +3462,15 @@ function updateSummaryPills(counts) {
   container.classList.remove("hidden");
   
   const pillConfigs = [
-    { key: "best",       icon: "★", class: "pill-best",       label: "Best" },
+    { key: "brilliant",  icon: "!!", class: "pill-brilliant",  label: "Brilliant" },
+    { key: "great",      icon: "!",  class: "pill-great",      label: "Great" },
+    { key: "best",       icon: "★",  class: "pill-best",       label: "Best" },
     { key: "excellent",  icon: "👍", class: "pill-excellent",  label: "Excellent" },
-    { key: "good",       icon: "✔", class: "pill-good",       label: "Good" },
-    { key: "inaccuracy", icon: "☡", class: "pill-inaccuracy", label: "Inaccuracy" },
+    { key: "good",       icon: "✔",  class: "pill-good",       label: "Good" },
+    { key: "book",       icon: "📖", class: "pill-good",       label: "Book" },
+    { key: "inaccuracy", icon: "☡",  class: "pill-inaccuracy", label: "Inaccuracy" },
     { key: "mistake",    icon: "❓", class: "pill-mistake",    label: "Mistake" },
+    { key: "miss",       icon: "✖",  class: "pill-miss",       label: "Miss" },
     { key: "blunder",    icon: "❌", class: "pill-blunder",    label: "Blunder" }
   ];
   
@@ -2839,29 +3517,16 @@ function updateCoachBubbleWithLiveEval(lines) {
     }
     updateEvalBar(cpWhite, evalStrWhite);
 
-    const panel = $("coach-panel");
-    if (panel) {
-      panel.classList.remove("hidden");
-      const badge = $("coach-move-badge");
-      if (badge) {
-        badge.className = "coach-badge";
-        badge.style.background = "#d4a055";
-        badge.style.color = "#110c07";
-        badge.textContent = "🔍";
-      }
-      const title = $("coach-move-title");
-      if (title) {
-        title.textContent = `Analysis · ${evalStr}`;
-      }
-      const txt = $("coach-text");
-      if (txt) {
-        if (move) {
-          txt.innerHTML = `You played <b>${move.san}</b>. Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`;
-        } else {
-          txt.innerHTML = `Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`;
-        }
-      }
-    }
+    setCoachContent({
+      hidden: false,
+      badgeText: "🔍",
+      badgeBg: "#d4a055",
+      badgeColor: "#110c07",
+      title: `Analysis · ${evalStr}`,
+      html: move
+        ? `You played <b>${move.san}</b>. Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`
+        : `Stockfish evaluates this position at <b>${evalStr}</b>. The best move is <b>${bestMove}</b>.`,
+    });
   }
 }
 
@@ -3210,7 +3875,6 @@ async function loadGameById(gameId) {
 }
 
 function loadPgnGame(pgn, gameId = null) {
-  $("btn-trigger-review").classList.add("loading");
   const phone = localStorage.getItem("userPhone") || "";
   const token = localStorage.getItem("sessionToken") || "";
   const bodyData = { pgn: pgn, mode: state.analysisMode, phone: phone, token: token };
@@ -3229,7 +3893,6 @@ function loadPgnGame(pgn, gameId = null) {
   })
   .catch(err => {
     alert("Error loading game: " + err.message);
-    $("btn-trigger-review").classList.remove("loading");
   });
 }
 

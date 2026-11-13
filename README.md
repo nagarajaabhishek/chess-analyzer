@@ -1,66 +1,57 @@
-# ChessNow — Free Local Chess Analyzer
+# ChessNow
 
-Analyse your Chess.com games locally with Stockfish. No paywall, no ads, no cloud.
+**Primary focus right now: ChessNow Analyzer** (`client/`) — local-first game analysis with Stockfish in the browser / iOS app.
+
+Voice telephony (`server/`) stays in this monorepo but is **secondary** until Analyzer is a solid, shippable product.
+
+| Product | Path | Status |
+|---------|------|--------|
+| **ChessNow Analyzer** | [`client/`](client/) | **Active focus** — web + Capacitor iOS |
+| ChessNow Voice | [`server/`](server/) | Frozen / later — Twilio phone chess |
+
+Official product name: **ChessNow**. Do not reintroduce “ChessLens” or “Voice Chessbot” in user-facing copy. Exception: iOS bundle ID `com.abhisheknagaraja.chesslens` must never change.
 
 ---
 
-## Setup (one time)
+## Analyzer — start here
 
-### 1. Install Stockfish
+Full setup, checklists, and iOS notes:
+
+**→ [`client/README.md`](client/README.md)**
+
+Fastest web run (no Python backend):
+
 ```bash
-brew install stockfish
+cd client
+npm install                 # installs deps + copies Stockfish 19 lite-single → static/js
+cd static
+python3 -m http.server 5173
 ```
 
-### 2. Install Python dependencies
+Open http://localhost:5173 — enter a Chess.com username, analyse with WebAssembly Stockfish 19.
+
+---
+
+## Repo map
+
+```text
+client/          Analyzer UI, Stockfish WASM, Capacitor iOS
+server/          Voice bot + optional API (not needed for Analyzer daily work)
+projects/        Product specs / OpenSpec notes
+```
+
+Architecture notes for contributors: [`CLAUDE.md`](CLAUDE.md).
+
+---
+
+## Voice (later)
+
+When Analyzer is in good shape, develop Voice from `server/`:
+
 ```bash
-cd chess-analyzer
+cd server
 pip install -r requirements.txt
+python3 app.py   # port 5174; loads env from server/.env
 ```
 
----
-
-## Run
-
-```bash
-python app.py
-```
-
-Then open **http://localhost:5000** in your browser.
-
----
-
-## How it works
-
-1. Enter your Chess.com username
-2. Your recent games load via Chess.com's **free public API** (no account needed)
-3. Click any game to analyse it
-4. Stockfish runs **locally on your machine** — nothing is sent anywhere
-5. See move-by-move analysis with accuracy %, eval bar, and win probability chart
-
-## Analysis modes
-
-| Mode   | Speed (40-move game) | Quality      |
-|--------|----------------------|--------------|
-| Quick  | ~3 sec               | Good         |
-| Normal | ~10 sec              | Very good    |
-| Deep   | ~30 sec              | Excellent    |
-
-## Move classifications
-
-| Symbol | Name       | Centipawn loss |
-|--------|------------|----------------|
-| ●  | Best       | 0–5            |
-| ●  | Excellent  | 6–20           |
-| ●  | Good       | 21–50          |
-| ⚠  | Inaccuracy | 51–100         |
-| ?  | Mistake    | 101–200        |
-| ?? | Blunder    | > 200          |
-
-## Keyboard shortcuts
-
-| Key         | Action     |
-|-------------|------------|
-| ← / ↓      | Previous move |
-| → / ↑      | Next move  |
-| Home        | Go to start |
-| End         | Go to last move |
+Requires Twilio (and related) secrets — never commit `.env`. Prefer keeping Voice deploys and secrets off any Analyzer static / App Store pipeline.
