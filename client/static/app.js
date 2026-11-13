@@ -940,22 +940,24 @@ function getBoardSize() {
     return Math.max(Math.min(widthFit, 280), Math.min(widthFit, heightFit));
   }
 
-  // Desktop: board + sidebar share one row.
+  // Desktop: board + sidebar share one row — grow to fill height/width like Chess.com.
   const rightCol = document.querySelector(".right-col");
-  const sidebar = (rightCol && rightCol.getBoundingClientRect().width) || Math.min(400, window.innerWidth * 0.36);
-  const gap = layoutStyle ? px(layoutStyle.columnGap) : 20;
+  const sidebarFallback = Math.min(480, Math.max(380, Math.floor(window.innerWidth * 0.28)));
+  const sidebar = (rightCol && rightCol.getBoundingClientRect().width) || sidebarFallback;
+  const gap = layoutStyle ? px(layoutStyle.columnGap) : 16;
   const availableWidth = Math.floor(layoutInner - gap - sidebar - evalBar);
 
-  // Fit board to the visible analysis viewport so content usually fits; page can still scroll if needed.
+  // Prefer nearly full viewport height (review mode hides the top header).
   const view = document.getElementById("view-analysis");
   let availableHeight;
   if (view) {
-    const padTop = parseFloat(getComputedStyle(view).paddingTop) || 70;
-    availableHeight = view.clientHeight - padTop - getBoardColChrome() - 20;
+    const padTop = parseFloat(getComputedStyle(view).paddingTop) || 8;
+    availableHeight = view.clientHeight - padTop - getBoardColChrome() - 12;
   } else {
-    availableHeight = window.innerHeight - 70 - getBoardColChrome() - 20;
+    availableHeight = window.innerHeight - getBoardColChrome() - 16;
   }
-  return Math.max(300, Math.min(availableWidth, availableHeight, 680));
+  // Soft ceiling only for ultrawide/tall monitors; otherwise use all available space.
+  return Math.max(320, Math.min(availableWidth, availableHeight, 960));
 }
 
 function resizeAnalysisBoard() {

@@ -1433,13 +1433,14 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   margin-top: 16px;
 }
 
-/* Analysis layout — board + review panel as one centered block */
+/* Analysis layout — board + review panel fill the viewport (Chess.com-like density) */
 .analysis-layout {
-  --analysis-gap: 20px;
+  --analysis-gap: 16px;
+  --analysis-sidebar: clamp(380px, 28vw, 480px);
   width: 100%;
-  max-width: 1240px;
+  max-width: none;
   margin: 0 auto;
-  padding: 4px 20px 20px;
+  padding: 6px 20px 12px;
   display: flex;
   /* Never wrap: the board is sized (getBoardSize) to leave room for the sidebar */
   flex-wrap: nowrap;
@@ -1448,17 +1449,16 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
   gap: var(--analysis-gap);
   align-items: flex-start;
   flex: 0 0 auto;
-  min-height: min(100%, calc(100dvh - 70px - var(--safe-top) - 12px));
+  min-height: min(100%, calc(100dvh - var(--safe-top) - 12px));
   overflow: visible;
   box-sizing: border-box;
 }
 
-/* Mid-width desktop windows: the workspace runs close to the left edge, where
-   the fixed menu button (12–56px) would sit on the top player's avatar. Indent
-   that one bar instead of shrinking the board. */
-@media (min-width: 901px) and (max-width: 1320px) {
-  body.is-reviewing #player-top {
-    padding-left: 48px;
+/* Leave room for the fixed sandwich menu on the left without shrinking the board */
+@media (min-width: 901px) {
+  body.is-reviewing .analysis-layout {
+    padding-left: 64px;
+    padding-right: 24px;
   }
 }
 
@@ -1797,13 +1797,13 @@ body.is-reviewing #view-analysis.is-reviewing .analysis-topbar {
 
 /* ── Right column / Game Review panel ── */
 .right-col {
-  width: min(400px, 36vw);
+  width: var(--analysis-sidebar, clamp(380px, 28vw, 480px));
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
   /* Exact height set in resizeAnalysisBoard to match .board-col */
-  max-height: calc(100dvh - 70px - var(--safe-top) - 24px);
+  max-height: calc(100dvh - var(--safe-top) - 16px);
   align-self: flex-start;
   overflow: hidden;
 }
